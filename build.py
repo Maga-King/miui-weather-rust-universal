@@ -160,7 +160,7 @@ def compile_native(tc: dict[str, Path]) -> dict[str, Path]:
         (ROOT / "native", original + r"\probe")))
     host, compat = output / "libweatherhost.so", output / "libweathercompat.so"
     run(*flags, required(ROOT / "port/host.c"), *xdl_sources,
-        "-llog", "-ldl", "-landroid", "-lmediandk", "-o", host)
+        "-llog", "-ldl", "-landroid", "-lmediandk", "-ljnigraphics", "-o", host)
     run(*flags, required(ROOT / "native/shim.c"), required(ROOT / "native/shim.S"), *xdl_sources,
         "-llog", "-ldl", "-Wl,-z,global", "-Wl,-soname,libweathercompat.so", "-o", compat)
     return {host.name: host, compat.name: compat}

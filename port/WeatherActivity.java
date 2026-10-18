@@ -261,7 +261,6 @@ public class WeatherActivity extends Activity implements SurfaceHolder.Callback 
         if(channel.equals("com.xiaomi.hyperos/rounded_corner"))return Collections.emptyList();
         if(channel.equals("com.xiaomi.hyperos/device_info"))return method.equals("getDeviceInfo")?Collections.emptyMap():false;
         if(channel.equals("com.xiaomi.hyperos/hyper_material")){
-            if(method.equals("getGlassCapability"))return new JSONObject().put("isSupportMaterial",false).put("isSupportGlass",false);
             return 0;
         }
         if(channel.equals("com.xiaomi.hyperos/system_navigation"))return 2;
@@ -472,7 +471,7 @@ public class WeatherActivity extends Activity implements SurfaceHolder.Callback 
             notifications.dispatchClick(intent,(name,bytes)->nativeSend(name,bytes));
         }
     }
-    @Override protected void onPause(){if(permissions!=null)permissions.onPause();if(location!=null)location.onPause();if(started)send("flutter/lifecycle","AppLifecycleState.inactive");super.onPause();}
+    @Override protected void onPause(){if(majestic!=null)majestic.pause();if(permissions!=null)permissions.onPause();if(location!=null)location.onPause();if(started)send("flutter/lifecycle","AppLifecycleState.inactive");super.onPause();}
     @Override protected void onStop(){
         main.removeCallbacks(cacheSync);
         if(!destroyed&&!isChangingConfigurations()&&WeatherWidgetProvider.hasWidgets(this))importSavedWeather(true);

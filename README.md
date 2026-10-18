@@ -57,3 +57,11 @@ Fork 不继承这些 Secrets。自行设置自己的签名后可以构建，但�
 本项目不是小米官方产品，与小米及一加无隶属关系。小米天气、HyperOS 运行库、字体、地图和相关美术资源保留原权利人的权利；仓库不将这些二进制资源声明为本项目原创或统一开源授权。
 
 新增兼容层代码的许可见 `LICENSE`，第三方组件说明见 `THIRD_PARTY_NOTICES.md`。仓库不包含手机数据库、个人日志、截图、系统密码或签名私钥。
+
+## v1.1.0 visual update
+
+Both APK variants now use raw CPU/GPU/RAM level 3, computility 6 (application tier 3, Majestic quality 2), with Lite/Middle modes disabled. Original glass, material and background blur are enabled. The glass compositor receives the actual Majestic weather background through app-local PixelCopy and AHardwareBuffer; capture stops while the activity is paused. No Root or screen-capture permission is required.
+
+This selects the highest verified original quality tier, not arbitrary maximum values: the original weather renderer retains its 0.75 render scale and its own frame-rate policy. The original overcast/cloudy icons are 52x52 raster assets and remain unchanged. Device testing covers startup, glass appearance and a foreground/background transition; broad device and long-duration power testing remain outstanding.
+
+The current references describe the v1.1.0 APK payloads. Historical v1.0.0 assets remain in that release. GitHub Actions rebuilds and checks every payload entry against the new references.

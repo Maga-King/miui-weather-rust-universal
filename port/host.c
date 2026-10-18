@@ -18,6 +18,7 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include <android/hardware_buffer.h>
+#include <android/bitmap.h>
 #include <media/NdkImageReader.h>
 #include "xdl.h"
 
@@ -100,6 +101,59 @@ static uintptr_t *api, callbacks[16];
 static void *runtime, *holder;
 static ANativeWindow *window;
 static double viewport[32];
+// Supply the original glass compositor with the actual Majestic background.
+// Each submitted frame owns an immutable AHB; the engine acquires its own ref
+// before handing it to the raster thread. No screen capture permission is used.
+typedef struct { AHardwareBuffer *buffer; int width,height; } GlassFrame;
+typedef struct {void *context;const uintptr_t *callbacks;} GlassSurfaceTexture;
+static void glass_frame_release(void *context) {
+    GlassFrame *frame=context;
+    if(frame){AHardwareBuffer_release(frame->buffer);free(frame);}
+}
+static AHardwareBuffer *glass_frame_get(void *context,int32_t *slot,int32_t *dataspace,
+        int32_t *hdr,float *matrix,uint32_t *transform,uint8_t *fresh,void *release_callback,
+        void *fence_wait,void *fence_context,ARect *crop) {
+    (void)release_callback;(void)fence_wait;
+    GlassFrame *frame=context;
+    static unsigned reads;
+    if(++reads==1)LOG("GLASS engine acquired original weather backdrop %dx%d",frame->width,frame->height);
+    if(slot)*slot=-1;
+    if(dataspace)*dataspace=0x08810000; // Android DATASPACE_SRGB
+    if(hdr)*hdr=0;
+    if(transform)*transform=0;
+    if(fresh)*fresh=1;
+    if(fence_context)*(int *)fence_context=-1; // CPU producer has already unlocked.
+    if(matrix){memset(matrix,0,16*sizeof(float));matrix[0]=matrix[5]=matrix[10]=matrix[15]=1;}
+    if(crop)*crop=(ARect){0,0,frame->width,frame->height};
+    AHardwareBuffer_acquire(frame->buffer);
+    return frame->buffer;
+}
+static const uintptr_t glass_frame_callbacks[]={0x18,(uintptr_t)glass_frame_release,(uintptr_t)glass_frame_get};
+JNIEXPORT void JNICALL Java_dev_weather_oneplus_MajesticSurface_nativeGlassBackdrop(JNIEnv *env,jobject self,jobject bitmap) {
+    (void)self;
+    if(!holder||!window)return;
+    AndroidBitmapInfo info={0};void *pixels=NULL;
+    if(AndroidBitmap_getInfo(env,bitmap,&info)!=ANDROID_BITMAP_RESULT_SUCCESS||info.format!=ANDROID_BITMAP_FORMAT_RGBA_8888)return;
+    AHardwareBuffer_Desc desc={.width=info.width,.height=info.height,.layers=1,.format=AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM,
+        .usage=AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN|AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE};
+    GlassFrame *frame=calloc(1,sizeof(*frame));
+    if(!frame)return;
+    if(AHardwareBuffer_allocate(&desc,&frame->buffer)){free(frame);return;}
+    frame->width=info.width;frame->height=info.height;
+    void *target=NULL;
+    if(AndroidBitmap_lockPixels(env,bitmap,&pixels)!=ANDROID_BITMAP_RESULT_SUCCESS){glass_frame_release(frame);return;}
+    if(AHardwareBuffer_lock(frame->buffer,AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN,-1,NULL,&target)){
+        AndroidBitmap_unlockPixels(env,bitmap);glass_frame_release(frame);return;
+    }
+    AHardwareBuffer_describe(frame->buffer,&desc);
+    for(uint32_t y=0;y<info.height;y++)memcpy((uint8_t *)target+y*desc.stride*4,(uint8_t *)pixels+y*info.stride,info.width*4);
+    AHardwareBuffer_unlock(frame->buffer,NULL);
+    AndroidBitmap_unlockPixels(env,bitmap);
+    ((void (*)(void *,int64_t,GlassSurfaceTexture))api[0x1b0/8])(holder,0,(GlassSurfaceTexture){frame,glass_frame_callbacks});
+    ((void (*)(void *,int64_t,uint8_t))api[0x1b8/8])(holder,0,1);
+    static unsigned count;
+    if(++count==1||count%300==0)LOG("GLASS supplied original weather backdrop %ux%u frame=%u",info.width,info.height,count);
+}
 // Engine callbacks can run concurrently with Activity replacement. A local JNI
 // reference keeps the callback target alive after the lock is released.
 static jobject current_activity(JNIEnv *env,jmethodID *method,int frame) {
