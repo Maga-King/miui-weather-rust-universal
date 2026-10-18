@@ -70,5 +70,14 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
           $releaseFiles = @(Get-ChildItem -LiteralPath dist -File | Where-Object { $_.Extension -in '.apk', '.json' -or $_.Name -eq 'SHA256SUMS.txt' } | ForEach-Object { $_.FullName })
-          gh release upload $releaseTag @releaseFiles --repo $env:GITHUB_REPOSITORY --clobber
+          $existingNames = @(gh release view $releaseTag --repo $env:GITHUB_REPOSITORY --json assets --jq '.assets[].name')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($releaseFile in $releaseFiles) {
+            $assetName = [System.IO.Path]::GetFileName($releaseFile)
+            if ($assetName -in $existingNames) {
+              Write-Host "Preserving existing release asset: $assetName"
+              continue
+            }
+            gh release upload $releaseTag $releaseFile --repo $env:GITHUB_REPOSITORY
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
