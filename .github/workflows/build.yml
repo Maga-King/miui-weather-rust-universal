@@ -1,0 +1,74 @@
+name: Build Android packages
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Optional release tag for these compiled packages'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install the pinned Android toolchain
+        shell: pwsh
+        run: |
+          sdkmanager "platforms;android-36" "build-tools;35.0.0" "ndk;29.0.14206865"
+      - name: Compile host, compatibility library, Java, DEX and resources
+        shell: pwsh
+        env:
+          WEATHER_KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
+          WEATHER_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          WEATHER_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          WEATHER_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          REQUESTED_RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          $buildArgs = @('build.py', '--fetch-inputs', '--variant', 'all', '--strict-payload')
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -or $env:REQUESTED_RELEASE_TAG) {
+            $buildArgs += '--require-signing'
+          }
+          python @buildArgs
+      - name: Upload compiled APKs and payload comparison reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: weather-packages-${{ github.sha }}
+          path: |
+            dist/*.apk
+            dist/*.json
+            dist/SHA256SUMS.txt
+          if-no-files-found: warn
+      - name: Publish the compiled release
+        if: success() && (startsWith(github.ref, 'refs/tags/') || inputs.release_tag != '')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          $releaseTag = if ($env:REQUESTED_RELEASE_TAG) { $env:REQUESTED_RELEASE_TAG } else { $env:GITHUB_REF_NAME }
+          gh release view $releaseTag --repo $env:GITHUB_REPOSITORY 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $releaseTag --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title $releaseTag --generate-notes
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          $releaseFiles = @(Get-ChildItem -LiteralPath dist -File | Where-Object { $_.Extension -in '.apk', '.json' -or $_.Name -eq 'SHA256SUMS.txt' } | ForEach-Object { $_.FullName })
+          gh release upload $releaseTag @releaseFiles --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

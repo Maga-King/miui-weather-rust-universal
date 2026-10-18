@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="weather_widget_name">天气</string>
+    <string name="weather_widget_aqi_good">空气优</string>
+    <string name="weather_widget_aqi_moderate">空气良</string>
+    <string name="weather_widget_aqi_pollution">轻度污染</string>
+    <string name="weather_widget_aqi_unhealthy">中度污染</string>
+    <string name="weather_widget_aqi_dangerous">重度污染</string>
+    <string name="weather_widget_aqi_hazardous">严重污染</string>
+    <string name="weather_widget_now">现在</string>
+</resources>

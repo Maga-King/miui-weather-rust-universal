@@ -1,0 +1,12 @@
+inputs/
+build/
+.build/
+dist/
+*.apk
+*.p12
+*.jks
+*.keystore
+*.log
+__pycache__/
+.env
+.env.*

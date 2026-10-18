@@ -1,0 +1,1 @@
+package com.miui.weather2map; public class ActivityMinuteRain extends android.app.Activity {}

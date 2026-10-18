@@ -1,0 +1,1 @@
+package dev.weather.oneplus; public final class WeatherPagesRuntime { public static void install(android.content.Context c) {} public static void prepareIntent(android.app.Activity a) {} }

@@ -1,0 +1,14 @@
+<resources>
+    <color name="weather_splash_background">#FF468EDB</color>
+    <style name="WeatherStartingTheme" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/weather_splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/weather_splash_no_icon</item>
+        <item name="windowSplashScreenIconBackgroundColor">@android:color/transparent</item>
+        <item name="windowSplashScreenAnimationDuration">0</item>
+        <item name="postSplashScreenTheme">@style/WeatherPostSplashTheme</item>
+        <item name="android:windowBackground">@drawable/original_weather_launch_background</item>
+    </style>
+    <style name="WeatherPostSplashTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@drawable/original_weather_launch_background</item>
+    </style>
+</resources>
