@@ -22,22 +22,28 @@
 - 原版主体界面、字体、图标、动态天气背景及预报入口。
 - 标准 Android 定位、后台定位和通知权限对接。
 - 标准桌面小组件，保持原有卡片设计；原版 MAML/PAG 动画尚未完整复现。
-- 自动更新通常每 30 分钟一次。关闭「夜间自动更新」时 **23:00–次日 04:00** 暂停自动联网；开启后夜间也更新。App 内手动刷新不受这个限制。
+- 天气设置内可调整相对于当前系统 DPI 的偏移；应用界面固定竖屏。
+- 「设置 → 字体与动画」可切换 MiSans／系统字体；字重默认跟随系统，关闭跟随后可手动调整为 50%–150%。字重设置只作用于 App，小组件保留原有字体和排版。
+- 天气动画默认以原生分辨率渲染；关闭后恢复原版 75% 渲染比例。应用按当前分辨率支持的最高刷新率请求显示，最高 120 Hz；已移除原引擎额外的低帧率限制。实际帧率取决于设备与系统调度。
+- 已提供基础天气、双城、逐小时、自定义横条、自定义天气、多日、综合预报和日出日落八款标准组件，各实例独立保存城市与配置。横条保留原设计比例，不会填满桌面较高的单行格子。双城的原版壁纸玻璃尚未接通。
+- 在「设置 → 管理小组件」中选择自动联网刷新间隔：10、20、30、45 分钟、1 小时或 2 小时，默认 20 分钟，所有组件共用。关闭「夜间自动更新」时 **23:00–次日 04:00** 暂停自动联网；开启后夜间也更新。App 内手动刷新不受这个限制。
 - 从天气返回桌面及进程存活时解锁会触发小组件刷新检查。Android 没有适用于所有桌面的实时可见性回调，系统省电策略也可能推迟任务。
 - 标准通知发送、取消、图标与本包点击目标已在主力机验证。早晚提醒读取真实今天／明天预报，正式预警读取天气接口数据并去重。
 - 「夜间免打扰」独立控制 **23:00–次日 07:00** 的本地通知，不等于夜间自动更新。
 - 小米推送 SDK 已嵌入，但首版实测仍停在底层账号注册阶段，**尚未取得有效注册回调，也未验证异常天气服务器推送送达**。本地通知测试通过不代表服务器推送通过。
-- 原版降水／空气质量页面的全部交互尚未完成全面验收。
+- 地图点选的地址解析失败时，仍会按点选坐标请求原版降水数据并显示信息卡；没有地址时使用坐标作为标题。原版降水／空气质量页面的全部交互尚未完成全面验收。
+
+ColorOS、OriginOS、One UI 的公开小组件协议、接入条件与玻璃效果限制见 [桌面小组件兼容说明](WIDGET_COMPATIBILITY.md)。标准组件是基础路径，厂商专有卡片的文档或外观不代表本应用已取得其授权或支持实时壁纸玻璃。
 
 ## 构建与最后一版一致性
 
 本仓库以发布时已在手机上安装的最后一版为基准，**未进行字体删减或 APK 瘦身**。
 
-`references/normal.json` 与 `references/test.json` 记录该版 APK SHA-256，以及每个有效 ZIP 条目的内容哈希。首个正式 Release 附件就是这两个原始成品。Actions 会真正重新编译宿主 Java、JNI 与资源，并与基准内容核对；它不会把下载现成 APK 改名当成编译。
+`references/normal.json` 与 `references/test.json` 记录验收版 APK SHA-256，以及每个有效 ZIP 条目的内容哈希。Actions 真正重新编译宿主 Java、JNI 与资源，并与基准内容核对；只有所有有效条目一致才发布新 Release。
 
 原版运行库、AOT、字体、地图资源和第三方 DEX/JAR 单独放在固定的构建输入 Release。`inputs.lock.json` 锁定归档 SHA-256，归档内 `manifest.json` 逐文件校验。无需访问作者的电脑目录、手机或完整 ROM。
 
-APK 的 ZIP 时间戳、签名容器等可能导致重新构建的文件总哈希不同；因此 **内容一致性和 APK 文件逐字节一致是两回事**。自动检查以 `references` 定义的有效条目为准，发布的原始 APK 则可直接验证完整文件 SHA-256。
+APK 的 ZIP 时间戳、签名容器等可能导致重新构建的文件总哈希不同；因此 **内容一致性和 APK 文件逐字节一致是两回事**。自动检查以 `references` 定义的有效条目为准，Release 的 `SHA256SUMS.txt` 则用于核验该次发布附件的完整文件。
 
 ### GitHub Actions
 
@@ -58,10 +64,10 @@ Fork 不继承这些 Secrets。自行设置自己的签名后可以构建，但�
 
 新增兼容层代码的许可见 `LICENSE`，第三方组件说明见 `THIRD_PARTY_NOTICES.md`。仓库不包含手机数据库、个人日志、截图、系统密码或签名私钥。
 
-## v1.1.0 visual update
+## v1.2.0 更新
 
-Both APK variants now use raw CPU/GPU/RAM level 3, computility 6 (application tier 3, Majestic quality 2), with Lite/Middle modes disabled. Original glass, material and background blur are enabled. The glass compositor receives the actual Majestic weather background through app-local PixelCopy and AHardwareBuffer; capture stops while the activity is paused. No Root or screen-capture permission is required.
+加入完整小组件选择和逐实例设置、相对系统 DPI 调整、字体与动画设置、可选的自动联网刷新间隔，并修复横条组件比例、Android 16 降水页中文区域识别及地图点选信息卡链路。字重默认跟随系统，MiSans 默认开启，自动联网刷新默认 20 分钟，天气动画原生分辨率默认开启。
 
-This selects the highest verified original quality tier, not arbitrary maximum values: the original weather renderer retains its 0.75 render scale and its own frame-rate policy. The original overcast/cloudy icons are 52x52 raster assets and remain unchanged. Device testing covers startup, glass appearance and a foreground/background transition; broad device and long-duration power testing remain outstanding.
+保留 v1.1.0 已验证的最高原版性能分级：CPU／GPU／RAM level 3，computility 6，应用 tier 3，Majestic quality 2，关闭 Lite／Middle 降级。原版玻璃和材质使用 App 内实际天气背景，不需要屏幕录制授权。小组件壁纸玻璃仍不在此能力范围内。
 
-The current references describe the v1.1.0 APK payloads. Historical v1.0.0 assets remain in that release. GitHub Actions rebuilds and checks every payload entry against the new references.
+当前构建基准对应本次手机验收版。历史 Release 附件保持原样；新 Release 由 Actions 重新编译并逐条校验后发布。Android 16 区域识别修复已合入，尚无 Android 16 实机验收记录；其他系统和长期耗电仍需更多测试。

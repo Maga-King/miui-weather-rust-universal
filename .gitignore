@@ -11,3 +11,5 @@ __pycache__/
 .env
 .env.*
 dist-max/
+dist-dpi/
+dist-strip-checked/

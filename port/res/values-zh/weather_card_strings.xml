@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="weather_dual_name">双城天气</string>
+    <string name="weather_hourly_name">逐小时天气</string>
+    <string name="weather_custom_small_name">自定义天气 · 小卡片</string>
+    <string name="weather_custom_name">自定义天气</string>
+    <string name="weather_daily_name">多日天气</string>
+    <string name="weather_complete_name">天气预报 · 综合</string>
+    <string name="weather_sun_name">日出日落</string>
+    <string name="weather_widget_air_quality">空气</string>
+    <string name="weather_widget_sunrise">日出</string>
+    <string name="weather_widget_sunset">日落</string>
+    <string name="weather_widget_hours_remaining">%1$d小时后</string>
+    <string name="weather_widget_minutes_remaining">%1$d分钟后</string>
+</resources>

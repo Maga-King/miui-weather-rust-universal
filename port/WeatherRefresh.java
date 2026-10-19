@@ -31,7 +31,8 @@ public final class WeatherRefresh {
     static Clock clock = Clock.systemUTC();
     static long now() { return clock.millis(); }
     private static final String EARLIEST = "earliest_ms", MANUAL = "manual", CHARGING = "charging", AUTO_EPOCH = "automatic_epoch";
-    private static final int POLICY_VERSION = 2;
+    private static final int POLICY_VERSION = 3;
+    private static final String INTERVAL_MINUTES="interval_minutes", SCHEDULED_INTERVAL="scheduled_interval_minutes";
     // AndroidPreferences: prefs_ + Base64URL(SHA-256(original namespace)), no padding.
     static final String NIGHT_PREFS = "prefs_aIMd59OyVnIazRDy-UXSXCX7E1GrGWrcsbKhCKaBKfo";
     static final String NIGHT_KEY = "night_update_setting";
@@ -39,6 +40,28 @@ public final class WeatherRefresh {
 
     static SharedPreferences state(Context context) {
         return context.getSharedPreferences("weather_refresh_state", Context.MODE_PRIVATE);
+    }
+    public static int intervalMinutes(Context context) {
+        int selected=state(context).getInt(INTERVAL_MINUTES,WeatherRefreshPolicy.DEFAULT_INTERVAL_MINUTES);
+        return WeatherRefreshPolicy.validIntervalMinutes(selected)?selected:WeatherRefreshPolicy.DEFAULT_INTERVAL_MINUTES;
+    }
+    public static long intervalMs(Context context) {return intervalMinutes(context)*60_000L;}
+    public static void setIntervalMinutes(Context context,int minutes) {
+        if(!WeatherRefreshPolicy.validIntervalMinutes(minutes))throw new IllegalArgumentException("Unsupported refresh interval");
+        SharedPreferences saved=state(context);
+        if(!saved.edit().putInt(INTERVAL_MINUTES,minutes).remove(SCHEDULED_INTERVAL).commit())
+            throw new IllegalStateException("Could not save refresh interval");
+        ensureScheduled(context);
+    }
+    /** Re-anchor a new cadence once; desktop events must not push it into the future. */
+    private static long applyIntervalPolicy(Context context) {
+        SharedPreferences saved=state(context);int minutes=intervalMinutes(context);
+        if(saved.getInt(SCHEDULED_INTERVAL,0)==minutes)return saved.getLong("next_periodic_ms",now());
+        long time=now(),success=saved.getLong("last_success_ms",0),attempt=saved.getLong("last_attempt_ms",0);
+        long anchor=Math.max(success>0&&success<=time?success:0,attempt>0&&attempt<=time?attempt:0);
+        long next=anchor==0?time:Math.max(time,WeatherRefreshPolicy.after(anchor,intervalMs(context)));
+        saved.edit().putInt(SCHEDULED_INTERVAL,minutes).putLong("next_periodic_ms",next).commit();
+        return next;
     }
     static boolean backgroundNeeded(Context context) {
         return WeatherWidgetProvider.hasWidgets(context)||WeatherAlerts.needsBackgroundWeather(context);
@@ -130,7 +153,7 @@ public final class WeatherRefresh {
         long time = now();
         migrateLegacy(context);
         if (freshUntil(context, time) > time) return true;
-        // A blocked local source has no HTTP freshness. Its completed 30-minute
+        // A blocked local source has no HTTP freshness. Its configured-cadence
         // successor must still survive desktop/widget events without being advanced.
         return scheduleAutomatic(context, Math.max(time, state(context).getLong("next_periodic_ms", time)), false, 0, false);
     }
@@ -143,13 +166,13 @@ public final class WeatherRefresh {
             && data.observedAtMs >= saved.getLong("success_observed_at_ms", 0)
             && !WeatherWidgetCache.WriteResult.FAILED.name().equals(saved.getString("success_cache_result", ""));
         // A backwards clock adjustment must not make old success fresh indefinitely.
-        return same && last > 0 && last <= time ? WeatherRefreshPolicy.after(last, INTERVAL_MS) : time;
+        return same && last > 0 && last <= time ? WeatherRefreshPolicy.after(last, intervalMs(context)) : time;
     }
     static long automaticTime(Context context, long earliest) {
         long time = now();
         SharedPreferences saved = state(context);
         long backoff = saved.getLong("next_attempt_ms", 0);
-        long maximum = WeatherRefreshPolicy.after(time, 6 * INTERVAL_MS);
+        long maximum = WeatherRefreshPolicy.after(time, WeatherRefreshPolicy.MAX_BACKOFF_MS);
         if (backoff > maximum) {
             // Clamp the stored target once, rather than applying a rolling three-hour
             // delay on every start after a backwards clock correction.
@@ -172,6 +195,7 @@ public final class WeatherRefresh {
         extras.putBoolean(MANUAL, manual); extras.putBoolean(CHARGING, charging);
         if (!manual) extras.putLong(AUTO_EPOCH, state(context).getLong(AUTO_EPOCH, 0));
         extras.putLong(EARLIEST, earliest); extras.putLong("due_ms", due); extras.putInt("policy_version", POLICY_VERSION);
+        extras.putInt(INTERVAL_MINUTES,intervalMinutes(context));
         boolean queued = scheduler.schedule(builder(context, id).setMinimumLatency(Math.max(0, due - now()))
                 .setRequiresCharging(charging).setExtras(extras).build()) == JobScheduler.RESULT_SUCCESS;
         if (queued) state(context).edit().putLong("last_schedule_ms", now()).commit();
@@ -247,7 +271,7 @@ public final class WeatherRefresh {
     static void completed(Context context, android.app.job.JobParameters parameters, boolean retry) {
         if (!networkAllowed(context)) return;
         long time = now();
-        long next = WeatherRefreshPolicy.after(time, retry ? BASE_BACKOFF_MS : INTERVAL_MS);
+        long next = WeatherRefreshPolicy.after(time, retry ? BASE_BACKOFF_MS : intervalMs(context));
         if (manual(parameters)) retiringManual = parameters.getJobId();
         else if (parameters.getJobId() == AUTO_JOB || parameters.getJobId() == AUTO_NEXT_JOB)
             retiringAutomatic = parameters.getJobId();
@@ -277,7 +301,9 @@ public final class WeatherRefresh {
         JobScheduler scheduler = context.getSystemService(JobScheduler.class);
         if (scheduler == null) return;
         migrateLegacy(context);
-        scheduleAutomatic(context, state(context).getLong("next_periodic_ms", now()), false, 0, false);
+        boolean intervalChanged=state(context).getInt(SCHEDULED_INTERVAL,0)!=intervalMinutes(context);
+        long next=applyIntervalPolicy(context);
+        scheduleAutomatic(context, next, false, 0, intervalChanged);
     }
     /** BOOT, TIME_SET and TIMEZONE_CHANGED callers re-evaluate wall-clock eligibility. */
     public static void reschedule(Context context) {

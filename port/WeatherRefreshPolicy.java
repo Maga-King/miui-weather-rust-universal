@@ -7,9 +7,15 @@ import java.time.ZonedDateTime;
 
 /** Wall-clock policy only; Android decides when an eligible job actually runs. */
 public final class WeatherRefreshPolicy {
-    public static final long INTERVAL_MS = 30 * 60 * 1000L;
+    public static final int DEFAULT_INTERVAL_MINUTES = 20;
+    public static final long INTERVAL_MS = DEFAULT_INTERVAL_MINUTES * 60 * 1000L;
     public static final long BASE_BACKOFF_MS = 30 * 1000L;
+    public static final long MAX_BACKOFF_MS = 3 * 60 * 60 * 1000L;
     private WeatherRefreshPolicy() {}
+
+    public static boolean validIntervalMinutes(int minutes) {
+        return minutes==10||minutes==20||minutes==30||minutes==45||minutes==60||minutes==120;
+    }
 
     public static boolean quiet(long timeMs, ZoneId zone) {
         int hour = Instant.ofEpochMilli(timeMs).atZone(zone).getHour();
@@ -33,7 +39,7 @@ public final class WeatherRefreshPolicy {
 
     public static long retryDelay(int failures) {
         int exponent = Math.max(1, Math.min(12, failures)) - 1;
-        return Math.min(6 * INTERVAL_MS, BASE_BACKOFF_MS * (1L << exponent));
+        return Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * (1L << exponent));
     }
 
     static long after(long nowMs, long delayMs) {

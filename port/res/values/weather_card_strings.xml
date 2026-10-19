@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="weather_dual_name">Dual-city weather</string>
+    <string name="weather_hourly_name">Hourly weather</string>
+    <string name="weather_custom_small_name">Custom weather · compact</string>
+    <string name="weather_custom_name">Custom weather</string>
+    <string name="weather_daily_name">Multi-day weather</string>
+    <string name="weather_complete_name">Weather forecast · detailed</string>
+    <string name="weather_sun_name">Sunrise and sunset</string>
+    <string name="weather_widget_air_quality">AQI</string>
+    <string name="weather_widget_sunrise">Sunrise</string>
+    <string name="weather_widget_sunset">Sunset</string>
+    <string name="weather_widget_hours_remaining">In %1$d hours</string>
+    <string name="weather_widget_minutes_remaining">In %1$d minutes</string>
+</resources>

@@ -11,6 +11,8 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Locale;
+import java.util.ArrayList;
+import java.util.List;
 import org.json.JSONObject;
 
 /** Read-only access to the original Dart SQLite database. Never creates or updates it. */
@@ -43,6 +45,28 @@ public final class WeatherDatabaseBridge {
             return new City(text(row, 0), text(row, 1), text(row, 2), text(row, 3),
                     text(row, 4), row.getInt(5) == 1, locale.toString(), temperatureUnit(context));
         }
+    }
+
+    /** Saved identities in original ordering; never substitutes another city for a missing ID. */
+    static List<City> selectedCities(Context context) {
+        List<City> cities = new ArrayList<>();
+        File file = context.getDatabasePath("weather.db");
+        if (!file.isFile()) return cities;
+        String locale = context.getResources().getConfiguration().getLocales().get(0).toString();
+        String unit = temperatureUnit(context);
+        try (SQLiteDatabase db = open(file);
+             Cursor row = db.rawQuery("SELECT posID,name,extra,latitude,longtitude,flag,locale "
+                     + "FROM selectedcity ORDER BY position ASC, flag DESC", null)) {
+            while (row.moveToNext()) cities.add(new City(text(row, 0), text(row, 1), text(row, 2),
+                    text(row, 3), text(row, 4), row.getInt(5) == 1, locale, unit));
+        }
+        return cities;
+    }
+
+    static City cityById(Context context, String id) {
+        if (id == null || id.isEmpty()) return null;
+        for (City city : selectedCities(context)) if (id.equals(city.id)) return city;
+        return null;
     }
 
     /**

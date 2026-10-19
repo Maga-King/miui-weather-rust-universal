@@ -49,18 +49,14 @@ final class WeatherWidgetRenderer {
     }
 
     private Typeface originalTypeface(int axisWeight, int androidWeight) {
-        Typeface face = new Typeface.Builder(context.getAssets(), "fonts/MiSansVF.ttf")
-            .setFontVariationSettings("'wght' " + axisWeight)
-            .setWeight(androidWeight).setItalic(false).build();
-        if (face == null) throw new IllegalStateException("Missing bundled MiSansVF.ttf");
-        return face;
+        return WeatherWidgetFonts.face(context, axisWeight, androidWeight);
     }
 
     Bitmap render(WeatherWidgetData data, long now, int width, int height) {
-        // Keep each RemoteViews bitmap comfortably within Binder's transaction limit.
-        float reduction = Math.min(1f, 440f / Math.max(width, height));
-        width = Math.max(1, Math.round(width * reduction));
-        height = Math.max(1, Math.round(height * reduction));
+        // The provider budgets shared RemoteViews bitmap memory for the display.
+        // Keep the host's pixel size instead of upscaling a 440 px fallback frame.
+        width = Math.max(1, width);
+        height = Math.max(1, height);
         Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(bitmap);
         float scale = Math.min(width, height) / 150f;
@@ -113,6 +109,19 @@ final class WeatherWidgetRenderer {
             asset(canvas, "weather1/weather_" + icon + "/" + (icon <= 3 && duration < 3 ? "night" : "day") + ".png", 111, 14, 26, 26);
         }
         return bitmap;
+    }
+
+    /** Shared original sky artwork only; each card supplies its own MAML layout. */
+    void drawSky(Canvas canvas, WeatherWidgetData data, long now, float width, float height) {
+        int phase = duration(data, now);
+        background(canvas, data, phase, width, height);
+        int type = data == null ? -1 : data.weatherType;
+        if ((type == 0 || type == 1) && phase >= 6 && phase <= 10)
+            asset(canvas, "light/" + (type == 1 ? "cloudy/" : "") + phase + ".png", 0, 0, width, height);
+        int cloud = type == 0 ? (phase >= 6 && phase <= 11 ? 1 : 2)
+            : type >= 1 && type <= 3 ? 3
+            : type >= 13 && type <= 17 || type == 22 || type == 25 ? 6 : 4;
+        asset(canvas, "cloud/cloud" + cloud + ".png", 0, 0, width * 1.2f, height);
     }
 
     private void background(Canvas canvas, WeatherWidgetData data, int duration, float w, float h) {

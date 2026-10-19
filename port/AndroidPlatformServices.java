@@ -72,6 +72,16 @@ public final class AndroidPlatformServices {
             if (scale < 0) scale = Settings.Global.getInt(context.getContentResolver(), FONT_SCALE, 50);
             return Collections.singletonMap("hyperosScale", Math.max(0, Math.min(100, scale)));
         }
+        if (INTENT.equals(channel) && "startActivity".equals(method)
+                && "dev.weather.oneplus.DISPLAY_CONFIG".equals(value(arguments, "action"))) {
+            activity.startActivity(new Intent(activity, WeatherAppearanceActivity.class));
+            return null;
+        }
+        if (INTENT.equals(channel) && "startActivity".equals(method)
+                && "dev.weather.oneplus.MANAGE_WIDGETS".equals(value(arguments, "action"))) {
+            activity.startActivity(new Intent(activity, WeatherWidgetManagementActivity.class));
+            return null;
+        }
         if (INTENT.equals(channel) && "overridePendingTransition".equals(method)) {
             List<?> animations = list(arguments);
             if (animations.size() != 2) throw new IllegalArgumentException("Expected two animation resources");

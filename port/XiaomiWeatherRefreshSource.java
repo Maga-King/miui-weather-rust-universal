@@ -3,6 +3,7 @@ package dev.weather.oneplus;
 import android.content.Context;
 import android.os.CancellationSignal;
 import android.os.OperationCanceledException;
+import android.os.SystemClock;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -25,14 +26,35 @@ public final class XiaomiWeatherRefreshSource implements WeatherRefreshSource {
         if (!WeatherRefresh.networkAllowed(context)) return Result.blocked("network_consent_required");
         WeatherDatabaseBridge.City city=WeatherDatabaseBridge.firstCity(context);
         if (city==null) return Result.blocked("city_selection_required");
+        Result result=fetchCity(context,city,cancellation);
+        if(result.networkVerified && !city.sameSelection(WeatherDatabaseBridge.firstCity(context)))
+            return Result.failed("selected_city_changed",true);
+        return result;
+    }
+
+    /** Widget requests use their real saved identity, never the primary notification city. */
+    Result fetchCity(Context context, WeatherDatabaseBridge.City city,
+            CancellationSignal cancellation) throws Exception {
+        return fetchCity(context,city,cancellation,Long.MAX_VALUE);
+    }
+    Result fetchCity(Context context, WeatherDatabaseBridge.City city,
+            CancellationSignal cancellation,long deadlineElapsed) throws Exception {
+        cancellation.throwIfCanceled();
+        if (!WeatherRefresh.networkAllowed(context)) return Result.blocked("network_consent_required");
+        if (city==null) return Result.blocked("city_selection_required");
         if (!city.valid()) return Result.blocked("selected_city_incomplete");
+        if (!city.sameSelection(WeatherDatabaseBridge.cityById(context,city.id)))
+            return Result.failed("selected_city_changed",true);
         String query="latitude="+encode(city.latitude)+"&longitude="+encode(city.longitude)
                 +"&isLocated="+city.located+"&locationKey="+encode(city.locationKey)
                 +"&days=15&appKey=weather20151024&sign=zUFJoAR2ZVrDy1vF3D07"
                 +"&appVersion=18.0.0.27-R&isGlobal=false&locale="+encode(city.locale);
+        long remaining=deadlineElapsed-SystemClock.elapsedRealtime();
+        if(remaining<1000)return Result.failed("widget_job_budget",true);
         HttpsURLConnection connection=(HttpsURLConnection)new URL(ENDPOINT+"?"+query).openConnection();
-        connection.setConnectTimeout(10000);
-        connection.setReadTimeout(15000);
+        // Reserve time for subsequent cities when a secondary endpoint stalls.
+        connection.setConnectTimeout((int)Math.min(deadlineElapsed==Long.MAX_VALUE?10000:5000,remaining));
+        connection.setReadTimeout((int)Math.min(deadlineElapsed==Long.MAX_VALUE?15000:8000,remaining));
         connection.setUseCaches(false);
         connection.setInstanceFollowRedirects(false);
         connection.setRequestProperty("Accept","application/json");
@@ -51,6 +73,8 @@ public final class XiaomiWeatherRefreshSource implements WeatherRefreshSource {
                 byte[] buffer=new byte[8192]; int size;
                 while ((size=input.read(buffer))!=-1) {
                     cancellation.throwIfCanceled();
+                    if(SystemClock.elapsedRealtime()>=deadlineElapsed)
+                        return Result.failed("widget_job_budget",true);
                     if (bytes.size()+size>MAX_BYTES) return Result.failed("weather_response_too_large",false);
                     bytes.write(buffer,0,size);
                 }
@@ -58,7 +82,7 @@ public final class XiaomiWeatherRefreshSource implements WeatherRefreshSource {
             }
             cancellation.throwIfCanceled();
             if (!WeatherRefresh.networkAllowed(context)) return Result.blocked("network_consent_required");
-            WeatherDatabaseBridge.City selected=WeatherDatabaseBridge.firstCity(context);
+            WeatherDatabaseBridge.City selected=WeatherDatabaseBridge.cityById(context,city.id);
             if (!city.sameSelection(selected)) return Result.failed("selected_city_changed",true);
             JSONObject response=new JSONObject(json);
             WeatherWidgetData observation=XiaomiWeatherParser.parse(response,

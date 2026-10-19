@@ -17,6 +17,9 @@ import subprocess
 import sys
 import urllib.request
 import zipfile
+from port.patch_dpi_settings import patch as patch_dpi_settings
+from port.patch_widget_settings import patch as patch_widget_settings
+from port.patch_weather_locale import patch as patch_weather_locale
 
 ROOT = Path(__file__).resolve().parent
 WORK = ROOT / ".build"
@@ -191,7 +194,7 @@ def compile_java(tc: dict[str, Path], inputs: Path) -> tuple[Path, Path, Path]:
     run(tc["javac"], "--release", "8", "-encoding", "UTF-8", "-classpath",
         os.pathsep.join(map(str, [tc["android"], stub_classes])), "-d", module, *module_sources)
     run(tc["javac"], "--release", "8", "-encoding", "UTF-8", "-classpath",
-        os.pathsep.join(map(str, [tc["android"], splash, splash_jar, mipush])), "-d", host, *host_sources)
+        os.pathsep.join(map(str, [tc["android"], splash, splash_jar, mipush, stub_classes])), "-d", host, *host_sources)
     return host, splash, module
 
 
@@ -262,6 +265,8 @@ def build_edition(edition: str, tc: dict[str, Path], inputs: Path,
         "--min-api", "28", "--output", stage, *host_classes, *sorted(splash.rglob("*.class")),
         inputs / "splash/splash-runtime-isolated.jar", inputs / "mipush/MiPush_SDK_Client_6_0_1-C.jar",
         required(inputs / "pages/original-weather-pages.dex"), *sorted(module.rglob("*.class")))
+    dex=stage / "classes.dex"
+    dex.write_bytes(patch_weather_locale(dex.read_bytes()))
     manifest = required(ROOT / "manifests" / (edition + ".xml"))
     import xml.etree.ElementTree as ET
     if ET.parse(manifest).getroot().get("package") != package:
@@ -282,7 +287,8 @@ def build_edition(edition: str, tc: dict[str, Path], inputs: Path,
             entries[name] = path.read_bytes()
     for name, path in native.items():
         entries["lib/arm64-v8a/" + name] = path.read_bytes()
-    entries["lib/arm64-v8a/libapp.so"] = required(inputs / "variants" / edition / "libapp.so").read_bytes()
+    entries["lib/arm64-v8a/libapp.so"] = patch_widget_settings(patch_dpi_settings(
+        required(inputs / "variants" / edition / "libapp.so").read_bytes(), tc["clang"]), tc["clang"])
     # Preserve ALL frozen asset bytes. Only explicitly supplied edition overlays differ.
     for directory in (ROOT / "port/assets", inputs / "variants" / edition / "assets"):
         if directory.is_dir():
@@ -292,6 +298,17 @@ def build_edition(edition: str, tc: dict[str, Path], inputs: Path,
                     if edition == "normal" and name.startswith("test-city/"):
                         continue
                     entries["assets/" + name] = path.read_bytes()
+    # Text fonts can fall back to Android without unregistering icon/symbol faces.
+    font_manifest=json.loads(entries["assets/flutter_assets/FontManifest.json"])
+    system_fonts=[family for family in font_manifest if family["family"].startswith("packages/hyperos/")]
+    entries["assets/flutter_assets/FontSystem__.json"]=json.dumps(system_fonts,separators=(",",":"),ensure_ascii=False).encode("utf-8")
+    # The in-app engine aliases this asset to the existing fonts/MiSansVF.ttf.
+    # No duplicated font data, changes to symbol fonts or widget font assets.
+    for family in font_manifest:
+        if family["family"] == "sans-serif" or family["family"] == "sans-serif-medium" or family["family"].startswith("mipro-"):
+            for font in family["fonts"]:
+                font["asset"]="fonts/WeatherMiSansVF.ttf"
+    entries["assets/flutter_assets/FontManifest.json"]=json.dumps(font_manifest,separators=(",",":"),ensure_ascii=False).encode("utf-8")
     unsigned = stage / "unsigned.apk"
     with zipfile.ZipFile(unsigned, "w") as output:
         for name, data in entries.items():

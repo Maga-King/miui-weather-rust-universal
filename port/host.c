@@ -32,10 +32,40 @@ static void host_log(const char *format, ...) {
 }
 #define LOG(...) host_log(__VA_ARGS__)
 static uintptr_t engine_base;
+static AAsset *text_font_asset_open(AAssetManager *manager,const char *name,int mode) {
+    const char *alias="fonts/WeatherMiSansVF.ttf";
+    size_t length=name?strlen(name):0,alias_length=strlen(alias);
+    // Only this private Flutter engine's GOT is redirected. Keep the single
+    // existing bundled VF file, and leave Android/widget asset access alone.
+    if(length>=alias_length&&!strcmp(name+length-alias_length,alias))
+        return AAssetManager_open(manager,"fonts/MiSansVF.ttf",mode);
+    return AAssetManager_open(manager,name,mode);
+}
 static void locate_engine(void *interface) {
     Dl_info engine={0};
     if(!dladdr(interface,&engine)||!engine.dli_fbase){LOG("RENDER missing engine base");return;}
     engine_base=(uintptr_t)engine.dli_fbase;
+}
+static int bind_font_manifest(void) {
+    uintptr_t *asset_open=(uintptr_t *)(engine_base+0x11033d8);
+    if(!engine_base||!*asset_open)return 0;
+    size_t asset_page=(size_t)sysconf(_SC_PAGESIZE);
+    uintptr_t asset_start=(uintptr_t)asset_open&~(asset_page-1);
+    if(mprotect((void*)asset_start,asset_page,PROT_READ|PROT_WRITE))return 0;
+    *asset_open=(uintptr_t)text_font_asset_open;
+    if(mprotect((void*)asset_start,asset_page,PROT_READ))return 0;
+    const char *system=getenv("WEATHER_SYSTEM_FONT");
+    if(!system||strcmp(system,"1")){LOG("FONT MiSans text and original symbol families");return 1;}
+    static const char original[]="FontManifest.json",replacement[]="FontSystem__.json";
+    char *literal=(char *)(engine_base+0x22e53);
+    if(!engine_base||memcmp(literal,original,sizeof(original))){LOG("FONT unsupported manifest literal");return 0;}
+    size_t page=(size_t)sysconf(_SC_PAGESIZE);
+    uintptr_t start=(uintptr_t)literal&~(page-1);
+    size_t extent=(((uintptr_t)literal+sizeof(original)+page-1)&~(page-1))-start;
+    if(mprotect((void *)start,extent,PROT_READ|PROT_WRITE))return 0;
+    memcpy(literal,replacement,sizeof(replacement));
+    if(mprotect((void *)start,extent,PROT_READ))return 0;
+    LOG("FONT Android system text; original symbol families retained");return 1;
 }
 // Keep these descriptors alive: the engine opens the short /proc/self/fd paths
 // lazily when its first smooth-corner or rounded-clip texture is requested.
@@ -99,6 +129,168 @@ static int first_frame_seen;
 static jmethodID message_method, frame_method;
 static uintptr_t *api, callbacks[16];
 static void *runtime, *holder;
+static _Atomic float font_weight_scale=1.f;
+static int font_weight_features, font_weight_initialized;
+// SkParagraph's findTypefaces(vector<SkString>, SkFontStyle, variations, bool,
+// float) returns a 24-byte vector in x8. Adjust the requested text style before
+// font matching; Xiaomi's set_font_weight_scale only adjusts certain VF faces.
+// This engine is private to the in-app Flutter surface. RemoteViews/Canvas
+// widgets use Android's font stack and never pass through this hook.
+typedef struct {void *begin,*end,*capacity;} TextFaces;
+typedef struct {const uintptr_t *begin,*end,*capacity;} TextFamilies;
+typedef struct {uint32_t tag;float value;} TextFontAxis;
+typedef struct {
+    int32_t collection_index,pad0;
+    TextFontAxis *begin,*end,*capacity;
+    int32_t palette_index,pad1;
+    void *palette_begin,*palette_end,*palette_capacity;
+    uint8_t present,padding[7];
+} TextFontArguments;
+_Static_assert(sizeof(TextFontArguments)==72,"FontArguments ABI");
+typedef TextFaces (*FindTextFaces)(void*,const TextFamilies*,uint64_t,void*,uint32_t,float);
+static FindTextFaces find_text_faces_original;
+static int text_mi_sans;
+static void *find_fallback_faces_original __attribute__((used));
+static unsigned adjusted_text_style(unsigned style,float scale) {
+    unsigned weight=(unsigned)((style&0xffffu)*scale+.5f);
+    if(weight<100)weight=100;if(weight>900)weight=900;
+    return (style&~0xffffu)|weight;
+}
+static unsigned __attribute__((used,noinline)) weight_fallback_style(unsigned style,int character) {
+    // Preserve symbol/emoji glyph faces. This path resolves characters absent
+    // from the primary face (notably Chinese text in Android system-font mode).
+    if(character>=0xe000&&character<=0xf8ff)return style;
+    float scale=atomic_load_explicit(&font_weight_scale,memory_order_relaxed);
+    if(scale==1.f)return style;
+    unsigned adjusted=adjusted_text_style(style,scale);
+    static unsigned diagnostics;
+    if(diagnostics++<12)LOG("FONT fallback U+%04X weight=%u -> %u",character,style&0xffff,adjusted&0xffff);
+    return adjusted;
+}
+// C++ sk_sp<SkTypeface> has a nontrivial return ABI in x8, even though it holds
+// just one pointer. Preserve that ABI, all input registers and the caller's LR.
+__attribute__((naked)) static void weighted_fallback_faces(void) {
+    __asm__ volatile(
+        "stp x29,x30,[sp,#-96]!\n"
+        "stp x0,x1,[sp,#16]\n"
+        "stp x2,x3,[sp,#32]\n"
+        "stp x4,x5,[sp,#48]\n"
+        "stp x6,x7,[sp,#64]\n"
+        "str x8,[sp,#80]\n"
+        "mov w0,w2\n"
+        "bl weight_fallback_style\n"
+        "mov w9,w0\n"
+        "ldp x0,x1,[sp,#16]\n"
+        "ldp x2,x3,[sp,#32]\n"
+        "ldp x4,x5,[sp,#48]\n"
+        "ldp x6,x7,[sp,#64]\n"
+        "ldr x8,[sp,#80]\n"
+        "mov w2,w9\n"
+        "ldp x29,x30,[sp],#96\n"
+        "adrp x16,find_fallback_faces_original\n"
+        "ldr x16,[x16,:lo12:find_fallback_faces_original]\n"
+        "br x16\n");
+}
+static TextFaces weighted_text_faces(void *collection,const TextFamilies *families,
+        uint64_t style,void *variations,uint32_t flags,float size) {
+    int symbols=0;
+    const char *family="";
+    if(families)for(const uintptr_t *p=families->begin;p<families->end;p++) {
+        const char *record=(const char *)*p;
+        if(p==families->begin&&record)family=record+8;
+        // SkString::Rec: length + reference count + UTF-8 characters.
+        if(record&&*(const uint32_t *)record>=17&&!memcmp(record+8,"packages/hyperos/",17)){symbols=1;break;}
+    }
+    float scale=atomic_load_explicit(&font_weight_scale,memory_order_relaxed);
+    TextFontArguments args={0};TextFontAxis axes[32];
+    if(!symbols&&text_mi_sans) {
+        // All named text faces share the original VF buffer. A family-specific
+        // starting axis preserves Xiaomi's light/regular/medium title design.
+        float axis=330;
+        unsigned base=(unsigned)style&0xffffu;
+        if(!strcmp(family,"sans-serif")||!*family) {
+            const int weights[]={100,200,300,350,400,500,600,700,800,900};
+            const int values[]={150,200,250,305,330,380,450,450,520,600};
+            axis=600;
+            for(int i=1;i<10;i++)if(base<=(unsigned)weights[i]) {
+                axis=values[i-1]+(values[i]-values[i-1])*((int)base-weights[i-1])/(float)(weights[i]-weights[i-1]);break;
+            }
+        } else if(!strcmp(family,"mipro-light"))axis=250;
+        else if(!strcmp(family,"mipro-normal"))axis=305;
+        else if(!strcmp(family,"mipro-medium")||!strcmp(family,"sans-serif-medium"))axis=380;
+        else if(!strcmp(family,"mipro-semibold"))axis=520;
+        // Preserve non-weight coordinates (e.g. width) supplied by the page.
+        TextFontArguments *old=(TextFontArguments *)variations;
+        size_t count=0;
+        if(old&&old->present) {
+            args=*old;
+            size_t old_count=(size_t)(old->end-old->begin);
+            for(size_t i=0;i<old_count&&count<31;i++) {
+                if(old->begin[i].tag==0x77676874)axis=old->begin[i].value;
+                else axes[count++]=old->begin[i];
+            }
+        }
+        axis*=scale;if(axis<150)axis=150;if(axis>700)axis=700;
+        axes[count++]=(TextFontAxis){0x77676874,axis};
+        args.begin=axes;args.end=args.capacity=axes+count;args.present=1;variations=&args;
+    }
+    if(!symbols&&scale!=1.f) {
+        unsigned base=(unsigned)style&0xffffu;
+        unsigned weight=adjusted_text_style((unsigned)style,scale)&0xffffu;
+        style=(style&~UINT64_C(0xffff))|weight;
+        static unsigned diagnostics;
+        if(diagnostics++<16)LOG("FONT text match weight=%u -> %u size=%.1f",base,weight,size);
+    }
+    return find_text_faces_original(collection,families,style,variations,flags,size);
+}
+static void *bind_text_hook(uintptr_t offset,const uint32_t prologue[4],void *hook) {
+    uint32_t *entry=(uint32_t *)(engine_base+offset);
+    if(!engine_base||memcmp(entry,prologue,16)){LOG("FONT text matcher ABI unsupported at %#lx",offset);return NULL;}
+    size_t page=(size_t)sysconf(_SC_PAGESIZE);
+    unsigned char *trampoline=mmap(NULL,page,PROT_READ|PROT_WRITE,MAP_ANONYMOUS|MAP_PRIVATE,-1,0);
+    if(trampoline==MAP_FAILED)return NULL;
+    memcpy(trampoline,entry,16);
+    // ldr x16, .+8; br x16; .quad target. The copied prologue is PC-independent.
+    const uint32_t jump[]={0x58000050,0xd61f0200};
+    memcpy(trampoline+16,jump,8);
+    uintptr_t resume=(uintptr_t)entry+16;memcpy(trampoline+24,&resume,8);
+    __builtin___clear_cache((char *)trampoline,(char *)trampoline+32);
+    if(mprotect(trampoline,page,PROT_READ|PROT_EXEC)){munmap(trampoline,page);return NULL;}
+    uintptr_t first=(uintptr_t)entry&~(page-1);
+    if(mprotect((void *)first,page,PROT_READ|PROT_WRITE|PROT_EXEC))return NULL;
+    memcpy(entry,jump,8);memcpy((char *)entry+8,&hook,8);
+    __builtin___clear_cache((char *)entry,(char *)entry+16);
+    if(mprotect((void *)first,page,PROT_READ|PROT_EXEC))return NULL;
+    return trampoline;
+}
+static int bind_text_weight(void) {
+    const char *system=getenv("WEATHER_SYSTEM_FONT");text_mi_sans=!system||strcmp(system,"1");
+    static const uint32_t primary[]={0xfc180fea,0x6d0123e9,0xa9027bfd,0xa9036ffc};
+    static const uint32_t fallback[]={0xd10443ff,0xfd004bea,0x6d0a23e9,0xa90b7bfd};
+    find_text_faces_original=(FindTextFaces)bind_text_hook(0xae9a3c,primary,(void*)weighted_text_faces);
+    find_fallback_faces_original=bind_text_hook(0xaeb3d8,fallback,(void*)weighted_fallback_faces);
+    if(!find_text_faces_original||!find_fallback_faces_original)return 0;
+    LOG("FONT in-app text weight matcher installed; symbol fonts excluded");return 1;
+}
+JNIEXPORT jboolean JNICALL Java_dev_weather_oneplus_WeatherFonts_nativeWeight(JNIEnv *env,jclass type,jfloat scale,jint features) {
+    (void)env;(void)type;
+    if(!holder||!api||!(scale>=.5f&&scale<=1.75f))return JNI_FALSE;
+    // Verified against this engine's own library_loader.cc diagnostics and ABI:
+    // 0x90: set_accessibility_features(holder,uint32_t)
+    // 0x98: set_font_weight_scale(holder,float), default 1.0 in FontCollection.
+    if(!find_text_faces_original||api[0x88/8]!=engine_base+0x6ae8d4||api[0x90/8]!=engine_base+0x6ae940||api[0x98/8]!=engine_base+0x6ae9bc){LOG("FONT weight ABI unsupported");return JNI_FALSE;}
+    features&=8; // Flutter AccessibilityFeature.boldText; no second weight multiplier.
+    if(font_weight_initialized&&font_weight_scale==scale&&font_weight_features==features)return JNI_FALSE;
+    atomic_store_explicit(&font_weight_scale,scale,memory_order_relaxed);
+    ((void (*)(void*,int))api[0x90/8])(holder,features);
+    // Match weights exactly once. Reload also clears the engine font/shaping
+    // caches, including paragraphs built before returning from settings.
+    ((void (*)(void*,float))api[0x98/8])(holder,1.f);
+    ((void (*)(void*))api[0x88/8])(holder);
+    font_weight_features=features;font_weight_initialized=1;
+    LOG("FONT weight scale=%.3f accessibilityBold=%d",scale,features!=0);
+    return JNI_TRUE;
+}
 static ANativeWindow *window;
 static double viewport[32];
 // Supply the original glass compositor with the actual Majestic background.
@@ -208,6 +400,67 @@ static ANativeWindow *mgl_window;
 static uint64_t mgl_generation,mgl_token,mgl_surface_id;
 static int mgl_width,mgl_height;
 static float mgl_x,mgl_y;
+static atomic_uint display_refresh_millihz;
+static int mgl_native_resolution=1;
+static uint32_t *mgl_render_scale_instruction;
+// All patches below are one aligned AArch64 instruction, checked against this
+// frozen renderer before writing. No scene, shader, quality tier or animation
+// timestamp is replaced. Only its extra frame-rate gate and render scale change.
+static int mgl_patch_instruction(uint32_t *target,uint32_t value) {
+    if(*target==value)return 1;
+    size_t page=(size_t)sysconf(_SC_PAGESIZE);
+    uintptr_t start=(uintptr_t)target&~(page-1);
+    if(mprotect((void *)start,page,PROT_READ|PROT_WRITE|PROT_EXEC)){
+        LOG("MGL render instruction write denied errno=%d",errno);return 0;
+    }
+    __atomic_store_n(target,value,__ATOMIC_RELEASE);
+    __builtin___clear_cache((char *)target,(char *)(target+1));
+    if(mprotect((void *)start,page,PROT_READ|PROT_EXEC)){
+        LOG("MGL render instruction protection restore failed errno=%d",errno);return 0;
+    }
+    return 1;
+}
+static int configure_mgl_rendering(void *library,uintptr_t base) {
+    uint32_t *constructor=dlsym(library,"_ZN7weather9FrameSyncC2Ev");
+    uint32_t *set_rate=dlsym(library,"_ZN7weather9FrameSync12setFrameRateEi");
+    uint32_t *scale=dlsym(library,"_ZNK11DeviceUtils14getRenderScaleEv");
+    // Constructor: str x8,[x0,#0x10] -> str xzr,[x0,#0x10].
+    // Setter: cmp w1,#1 -> b <its own zero-interval branch>.
+    // This removes the default 15 ms / configured 30/60 Hz software gate;
+    // AChoreographer still supplies every actual display vsync and real delta.
+    if((uintptr_t)constructor!=base+0xffc38||(uintptr_t)set_rate!=base+0xffec4||
+            (uintptr_t)scale!=base+0xee418||constructor[11]!=0xf9000808||
+            set_rate[0]!=0x7100043f||set_rate[12]!=0xf900081f||
+            scale[0]!=0xbd400400||scale[1]!=0xd65f03c0){
+        LOG("MGL unsupported frame pacing/render scale ABI");return 0;
+    }
+    if(!mgl_patch_instruction(constructor+11,0xf900081f)||
+            !mgl_patch_instruction(set_rate,0x1400000c))return 0;
+    mgl_render_scale_instruction=scale;
+    if(!mgl_patch_instruction(scale,mgl_native_resolution?0x1e2e1000:0xbd400400))return 0;
+    LOG("MGL display-vsync pacing enabled; native resolution=%d render scale=%s",
+        mgl_native_resolution,mgl_native_resolution?"1.0":"original device scale");
+    return 1;
+}
+JNIEXPORT void JNICALL Java_dev_weather_oneplus_WeatherRenderPreferences_nativeRefreshRate(JNIEnv *env,jclass cls,jfloat actual) {
+    (void)env;(void)cls;
+    if(!(actual>0&&actual<=1000))return;
+    unsigned rate=(unsigned)(actual*1000.0f+0.5f);
+    unsigned previous=atomic_exchange(&display_refresh_millihz,rate);
+    if(previous==rate)return;
+    LOG("DISPLAY actual refresh=%.3f Hz; engine compatibility report=120 Hz (not measured FPS)",rate/1000.0);
+}
+JNIEXPORT jboolean JNICALL Java_dev_weather_oneplus_WeatherRenderPreferences_nativeResolution(JNIEnv *env,jclass cls,jboolean enabled) {
+    (void)env;(void)cls;
+    int next=enabled?1:0;
+    if(next==mgl_native_resolution)return JNI_FALSE;
+    if(mgl_render_scale_instruction&&
+            !mgl_patch_instruction(mgl_render_scale_instruction,next?0x1e2e1000:0xbd400400))return JNI_FALSE;
+    mgl_native_resolution=next;
+    LOG("MGL native resolution preference=%d",next);
+    // Before engine startup there is no window to recreate yet.
+    return mgl_render_scale_instruction?JNI_TRUE:JNI_FALSE;
+}
 static void init_mgl_lock(void) {
     pthread_mutexattr_t attr;pthread_mutexattr_init(&attr);
     pthread_mutexattr_settype(&attr,PTHREAD_MUTEX_RECURSIVE);
@@ -421,6 +674,7 @@ static int bind_mgl_surfaces(void *library) {
     if(!getter||!dladdr(getter,&native)||(uintptr_t)getter-(uintptr_t)native.dli_fbase!=0x11f83c){
         LOG("MGL unsupported surface provider ABI");return 0;
     }
+    if(!configure_mgl_rendering(library,(uintptr_t)native.dli_fbase))return 0;
     const struct {size_t offset;uintptr_t implementation;} providers[]={
         {0x146850,(uintptr_t)mgl_create_image_reader},
         {0x146858,(uintptr_t)mgl_unregister_image},
@@ -569,6 +823,8 @@ JNIEXPORT jstring JNICALL Java_dev_weather_oneplus_WeatherActivity_startEngine(J
     }
     if (!api || api[0] != 0x268) { snprintf(error, sizeof(error), "Unexpected engine interface"); goto done; }
     locate_engine(api);
+    if(!bind_font_manifest()){snprintf(error,sizeof(error),"Font manifest selection failed");goto done;}
+    if(!bind_text_weight()){snprintf(error,sizeof(error),"Text weight matcher binding failed");goto done;}
     if(!bind_corner_textures(more)){snprintf(error,sizeof(error),"Engine corner textures could not be loaded");goto done;}
     callbacks[0] = 0x68;
     for (size_t i = 1; i < 13; i++) callbacks[i] = (uintptr_t)unused_callback;
@@ -663,10 +919,13 @@ JNIEXPORT void JNICALL Java_dev_weather_oneplus_WeatherActivity_nativeSurface(JN
     }else ANativeWindow_release(next);
     memset(viewport,0,sizeof(viewport));
     viewport[0]=density; viewport[1]=width; viewport[2]=height;
-    ((void (*)(void*,double,double,double,double))api[0xc8/8])(holder,60.0,width,height,density);
+    // The original host falsely fixed this at 60. Report 120 to remove its
+    // compatibility ceiling; never synthesize vsync or alter frame timestamps.
+    ((void (*)(void*,double,double,double,double))api[0xc8/8])(holder,120.0,width,height,density);
     ((void (*)(void*,void*))api[0xa0/8])(holder,viewport);
     ((void (*)(void*,int,int))api[0xb0/8])(holder,width,height);
-    LOG("Surface %dx%d @%f",width,height,density);
+    LOG("Surface %dx%d @%f engine report=120 Hz actual display=%.3f Hz",width,height,density,
+        atomic_load(&display_refresh_millihz)/1000.0);
 }
 JNIEXPORT void JNICALL Java_dev_weather_oneplus_WeatherActivity_nativeTouch(JNIEnv *env, jobject self, jobject buffer, jint length) {
     if(!holder || !is_current_activity(env,self) || length<=0 || length%312) return;

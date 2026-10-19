@@ -26,8 +26,9 @@ public final class WeatherWidgetCache {
     public static boolean publishCached(Context context, WeatherWidgetData data) {
         return publish(context, data) != WriteResult.FAILED;
     }
-    static synchronized WriteResult publish(Context context, WeatherWidgetData data) {
+    static WriteResult publish(Context context, WeatherWidgetData data) {
         if (data == null) return WriteResult.FAILED;
+        synchronized (WeatherWidgetCache.class) {
         try {
             WeatherWidgetData previous = read(context);
             if (previous != null && previous.cityId.equals(data.cityId) && previous.unit.equals(data.unit)
@@ -41,14 +42,17 @@ public final class WeatherWidgetCache {
         } catch (Exception error) {
             Log.w("WeatherWidget", "Cannot save observation", error); return WriteResult.FAILED;
         }
+        }
         // A renderer failure does not undo a successfully committed observation.
         try { WeatherWidgetProvider.updateAll(context); }
         catch (Exception error) { Log.w("WeatherWidget", "Cannot redraw saved observation", error); }
         return WriteResult.REPLACED;
     }
     /** Call only when the selected city is removed or the user clears weather data. */
-    public static synchronized void clear(Context context) {
-        preferences(context).edit().remove("snapshot").commit();
+    public static void clear(Context context) {
+        synchronized (WeatherWidgetCache.class) {
+            preferences(context).edit().remove("snapshot").commit();
+        }
         WeatherWidgetProvider.updateAll(context);
     }
 }

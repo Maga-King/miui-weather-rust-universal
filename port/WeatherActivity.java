@@ -18,6 +18,10 @@ public class WeatherActivity extends Activity implements SurfaceHolder.Callback 
     private final Handler main = new Handler(Looper.getMainLooper());
     private SurfaceView surface;
     private TextView status;
+    private int attachedDensityDpi;
+    private boolean densityRecreationPending;
+    private boolean foregroundResumed;
+    private final Runnable densityRefresh=this::refreshDisplayDensity;
     private AndroidStartupSplash startupSplash;
     private boolean started;
     private AndroidTextInput textInput;
@@ -52,9 +56,19 @@ public class WeatherActivity extends Activity implements SurfaceHolder.Callback 
     private native void nativeInsets(int left,int top,int right,int bottom,int imeBottom,int gestureLeft,int gestureTop,int gestureRight,int gestureBottom,double touchSlop);
     private native void nativeDetach();
     private native void nativeAttach();
+    @Override protected void attachBaseContext(android.content.Context base){
+        android.content.Context wrapped=WeatherDisplayDensity.wrap(base);
+        super.attachBaseContext(wrapped);
+        attachedDensityDpi=wrapped.getResources().getDisplayMetrics().densityDpi;
+    }
     @Override public void onCreate(Bundle state){
         startupSplash=AndroidStartupSplash.install(this,this::configureSystemBars);
         super.onCreate(state);
+        if(state!=null){
+            currentRoute=state.getString("weather_current_route");
+            frameworkHandlesBack=state.getBoolean("weather_framework_back",false);
+            requestedRouteOpened=state.getBoolean("weather_launch_route_opened",false);
+        }
         configureSystemBars();
         try{channelLog=new PrintWriter(new OutputStreamWriter(new FileOutputStream(new File(getFilesDir(),"channels.log"),diagnosticsOpened),StandardCharsets.UTF_8),true);diagnosticsOpened=true;}
         catch(IOException error){Log.e("WeatherChannel","Cannot create diagnostics",error);}
@@ -74,6 +88,7 @@ public class WeatherActivity extends Activity implements SurfaceHolder.Callback 
         AndroidMiPushBridge.attach(pushSender);
         networkConsent=WeatherRefresh.networkAllowed(this);
         if(Build.VERSION.SDK_INT>=33)backCallback=this::dispatchBack;
+        updateBackCallback();
         surface=new SurfaceView(this){
             @Override public boolean onCheckIsTextEditor(){return textInput.client>=0;}
             @Override public android.view.inputmethod.InputConnection onCreateInputConnection(android.view.inputmethod.EditorInfo info){return textInput.connection(info);}
@@ -84,6 +99,7 @@ public class WeatherActivity extends Activity implements SurfaceHolder.Callback 
         setContentView(root);surface.getHolder().addCallback(this);
         root.setOnApplyWindowInsetsListener((view,insets)->{lastInsets=insets;applyInsets();return insets;});
         try{
+            WeatherFonts.configureEngine(this);
             System.loadLibrary("weatherhost");
             majestic=new MajesticSurface(this,root,surface);
             File extra=new File(getFilesDir(),"runtime");extra.mkdirs();
@@ -133,13 +149,31 @@ public class WeatherActivity extends Activity implements SurfaceHolder.Callback 
                 .put("textScaleFactor",(double)config.fontScale)
                 .put("alwaysUse24HourFormat",android.text.format.DateFormat.is24HourFormat(this));
             send("flutter/settings",settings.toString());
+            if(WeatherFonts.syncEngine(this))send("flutter/system","{\"type\":\"fontsChange\"}");
             Log.i("WeatherHost","System theme synchronized: "+(dark?"dark":"light"));
         }catch(JSONException error){Log.e("WeatherHost","Cannot synchronize system settings",error);}
     }
     @Override public void onConfigurationChanged(android.content.res.Configuration config){
         super.onConfigurationChanged(config);
+        if(recreateForDensity())return;
         sendSystemSettings();
-        if(started){surface.requestApplyInsets();applyInsets();}
+        if(started){
+            if(surface.getHolder().getSurface().isValid())nativeSurface(surface.getHolder().getSurface(),surface.getWidth(),surface.getHeight(),getResources().getDisplayMetrics().density);
+            surface.requestApplyInsets();applyInsets();
+        }
+    }
+    private boolean recreateForDensity(){
+        if(densityRecreationPending)return true;
+        if(!WeatherDisplayDensity.needsRecreation(this,attachedDensityDpi))return false;
+        densityRecreationPending=true;recreate();return true;
+    }
+    private void scheduleDensityRefresh(){
+        if(!WeatherDisplayDensity.needsRecreation(this,attachedDensityDpi))return;
+        main.removeCallbacks(densityRefresh);
+        main.postDelayed(densityRefresh,250);
+    }
+    private void refreshDisplayDensity(){
+        if(!destroyed&&foregroundResumed)recreateForDensity();
     }
     void sendMethod(String channel,String method,Object args){
         if(channelLog!=null)channelLog.println("OUT "+channel+" :: "+method+" args="+String.valueOf(args));
@@ -180,6 +214,7 @@ public class WeatherActivity extends Activity implements SurfaceHolder.Callback 
             Object result=handleCall(channel,method,args);
             if(result==UNSUPPORTED){Log.w("WeatherChannel","UNIMPLEMENTED "+channel+" :: "+method);if(channelLog!=null)channelLog.println("UNIMPLEMENTED "+channel+" :: "+method);nativeReply(id,null);return;}
             replyResult(channel,json,id,result);
+            scheduleDensityRefresh();
         }catch(AndroidWeatherNotifications.NotificationException error){replyError(json,id,error.code,error.getMessage());}
         catch(Throwable error){Log.e("WeatherChannel",channel+" :: "+method,error);if(channelLog!=null)error.printStackTrace(channelLog);nativeReply(id,null);}
     }
@@ -220,7 +255,7 @@ public class WeatherActivity extends Activity implements SurfaceHolder.Callback 
             if(method.equals("routeInformationUpdated")){
                 currentRoute=args instanceof JSONObject?((JSONObject)args).optString("uri",""):null;
                 String route=getIntent().getStringExtra("open_route");
-                if(!requestedRouteOpened&&("/searchCity".equals(route)||"/cityManagement".equals(route))){
+                if(!requestedRouteOpened&&isAllowedLaunchRoute(route)){
                     requestedRouteOpened=true;main.post(()->sendMethod("flutter/navigation","pushRoute",route));
                 }
                 maybeOpenCityPicker();
@@ -365,11 +400,15 @@ public class WeatherActivity extends Activity implements SurfaceHolder.Callback 
     }
     private JSONObject configuration()throws JSONException{
         android.util.DisplayMetrics d=getResources().getDisplayMetrics();android.content.res.Configuration c=getResources().getConfiguration();
+        android.graphics.Rect bounds=Build.VERSION.SDK_INT>=30?getWindowManager().getCurrentWindowMetrics().getBounds():new android.graphics.Rect(0,0,d.widthPixels,d.heightPixels);
+        int widthDp=Math.max(1,Math.round(bounds.width()/d.density));
+        int heightDp=Math.max(1,Math.round(bounds.height()/d.density));
+        int smallestDp=Math.max(1,Math.round(c.smallestScreenWidthDp*(WeatherDisplayDensity.systemDpi(this)/(float)d.densityDpi)));
         JSONObject j=new JSONObject();String[] zero={"color_mode","screen_type","display_id"};for(String k:zero)j.put(k,0);
-        j.put("orientation",c.orientation).put("screen_layout",c.screenLayout).put("screen_width_dp",c.screenWidthDp).put("screen_height_dp",c.screenHeightDp).put("smallest_screen_width_dp",c.smallestScreenWidthDp).put("density_dpi",d.densityDpi).put("display_name","Built-in Screen").put("display_logical_density_dpi",d.densityDpi).put("display_shape_width",d.widthPixels).put("display_shape_height",d.heightPixels);
+        j.put("orientation",c.orientation).put("screen_layout",c.screenLayout).put("screen_width_dp",widthDp).put("screen_height_dp",heightDp).put("smallest_screen_width_dp",smallestDp).put("density_dpi",d.densityDpi).put("display_name","Built-in Screen").put("display_logical_density_dpi",d.densityDpi).put("display_shape_width",bounds.width()).put("display_shape_height",bounds.height());
         JSONObject zeroRect=new JSONObject().put("left",0).put("top",0).put("right",0).put("bottom",0);
         JSONObject cut=new JSONObject(zeroRect.toString());for(String side:new String[]{"left","top","right","bottom"})cut.put("bounding_rect_"+side,zeroRect);
-        j.put("display_cutout",cut).put("window_bounds",new JSONObject().put("left",0).put("top",0).put("right",d.widthPixels).put("bottom",d.heightPixels)).put("is_multi_window",isInMultiWindowMode());
+        j.put("display_cutout",cut).put("window_bounds",new JSONObject().put("left",bounds.left).put("top",bounds.top).put("right",bounds.right).put("bottom",bounds.bottom)).put("is_multi_window",isInMultiWindowMode());
         j.put("dm_width_pixels",d.widthPixels).put("dm_height_pixels",d.heightPixels).put("dm_density",d.density).put("dm_density_dpi",d.densityDpi).put("dm_scaled_density",d.scaledDensity).put("dm_x_dpi",d.xdpi).put("dm_y_dpi",d.ydpi);return j;
     }
     public void surfaceCreated(SurfaceHolder holder){}
@@ -443,6 +482,8 @@ public class WeatherActivity extends Activity implements SurfaceHolder.Callback 
     @Override protected void onStart(){super.onStart();if(started)send("flutter/lifecycle","AppLifecycleState.inactive");}
     @Override protected void onResume(){
         super.onResume();
+        foregroundResumed=true;
+        if(recreateForDensity())return;
         configureSystemBars();
         if(started){
             nativeAttach();if(majestic!=null)majestic.attach();
@@ -463,7 +504,7 @@ public class WeatherActivity extends Activity implements SurfaceHolder.Callback 
                 manager.requestPinAppWidget(new android.content.ComponentName(this,WeatherWidgetProvider.class),null,null);
         }
         String route=intent.getStringExtra("open_route");
-        if(started&&("/searchCity".equals(route)||"/cityManagement".equals(route))){
+        if(started&&isAllowedLaunchRoute(route)){
             requestedRouteOpened=true;sendMethod("flutter/navigation","pushRoute",route);
         }
         if(started){
@@ -471,7 +512,16 @@ public class WeatherActivity extends Activity implements SurfaceHolder.Callback 
             notifications.dispatchClick(intent,(name,bytes)->nativeSend(name,bytes));
         }
     }
-    @Override protected void onPause(){if(majestic!=null)majestic.pause();if(permissions!=null)permissions.onPause();if(location!=null)location.onPause();if(started)send("flutter/lifecycle","AppLifecycleState.inactive");super.onPause();}
+    @Override protected void onPause(){foregroundResumed=false;if(majestic!=null)majestic.pause();if(permissions!=null)permissions.onPause();if(location!=null)location.onPause();if(started)send("flutter/lifecycle","AppLifecycleState.inactive");super.onPause();}
+    private static boolean isAllowedLaunchRoute(String route){
+        return "/searchCity".equals(route)||"/cityManagement".equals(route)||"/settings".equals(route);
+    }
+    @Override protected void onSaveInstanceState(Bundle state){
+        state.putString("weather_current_route",currentRoute);
+        state.putBoolean("weather_framework_back",frameworkHandlesBack);
+        state.putBoolean("weather_launch_route_opened",requestedRouteOpened);
+        super.onSaveInstanceState(state);
+    }
     @Override protected void onStop(){
         main.removeCallbacks(cacheSync);
         if(!destroyed&&!isChangingConfigurations()&&WeatherWidgetProvider.hasWidgets(this))importSavedWeather(true);
@@ -488,7 +538,7 @@ public class WeatherActivity extends Activity implements SurfaceHolder.Callback 
     }
     @Override protected void onDestroy(){
         AndroidMiPushBridge.detach(pushSender);
-        destroyed=true;main.removeCallbacks(cacheSync);cacheWorker.shutdown();
+        destroyed=true;main.removeCallbacks(cacheSync);main.removeCallbacks(densityRefresh);cacheWorker.shutdown();
         if(permissions!=null)permissions.onDestroy();if(consent!=null)consent.onDestroy();if(location!=null)location.onDestroy();
         if(platformServices!=null)platformServices.onDestroy();
         if(Build.VERSION.SDK_INT>=33&&backRegistered)getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(backCallback);

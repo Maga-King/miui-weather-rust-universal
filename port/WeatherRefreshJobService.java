@@ -6,6 +6,7 @@ import android.os.CancellationSignal;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -21,6 +22,7 @@ public final class WeatherRefreshJobService extends JobService {
     private static final class Work {
         final JobParameters parameters;
         final CancellationSignal cancellation = new CancellationSignal();
+        final long widgetDeadlineElapsed = SystemClock.elapsedRealtime() + TIMEOUT_MS - 5000;
         Future<?> future;
         Runnable timeout;
         Work(JobParameters parameters) { this.parameters = parameters; }
@@ -55,8 +57,9 @@ public final class WeatherRefreshJobService extends JobService {
         work.future = worker.submit(() -> {
             WeatherRefreshSource.Result outcome;
             WeatherDatabaseBridge.City selection = null;
+            WeatherRefreshSource source = null;
             try {
-                WeatherRefreshSource source = WeatherRefresh.source(this);
+                source = WeatherRefresh.source(this);
                 if (source == null) outcome = WeatherRefreshSource.Result.blocked("source_not_configured");
                 else if (!WeatherRefresh.automaticCurrent(this, parameters))
                     outcome = WeatherRefreshSource.Result.blocked("automatic_cancelled");
@@ -73,13 +76,29 @@ public final class WeatherRefreshJobService extends JobService {
                 // Error types only: provider URLs or keys must not enter widget state/logs.
                 outcome = WeatherRefreshSource.Result.failed(error.getClass().getSimpleName(), true);
             }
+            boolean additionalRetry = false;
+            // Widget cities use the same eligible Job and cancellation signal. A primary
+            // failure must not prevent other explicitly configured widget cities refreshing.
+            if (source instanceof XiaomiWeatherRefreshSource && !work.cancellation.isCanceled()
+                    && WeatherRefresh.automaticCurrent(this, parameters)
+                    && !"automatic_deferred".equals(outcome.reason)
+                    && !"automatic_cancelled".equals(outcome.reason)) {
+                try {
+                    additionalRetry = WeatherWidgetCityCache.refreshWidgets(getApplicationContext(),
+                            (XiaomiWeatherRefreshSource)source, selection, outcome,
+                            work.cancellation, work.widgetDeadlineElapsed);
+                } catch (Exception error) {
+                    additionalRetry = true;
+                }
+            }
             WeatherRefreshSource.Result result = outcome;
+            boolean widgetRetry = additionalRetry;
             WeatherDatabaseBridge.City requestedCity = selection;
             main.post(() -> {
                 if (jobs.get(parameters.getJobId()) != work || work.cancellation.isCanceled()) return;
                 if (!WeatherRefresh.networkAllowed(this)) { finish(work, false); return; }
                 if (!WeatherRefresh.automaticCurrent(this, parameters)) { finish(work, false); return; }
-                boolean retry = result.retryable;
+                boolean retry = result.retryable || widgetRetry;
                 if (result.networkVerified) {
                     // Selection can change after the source's final check while this
                     // completion waits in the main queue. Never overwrite that city's cache.
