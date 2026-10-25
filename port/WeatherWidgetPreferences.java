@@ -5,7 +5,6 @@ import android.appwidget.AppWidgetProviderInfo;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.database.Cursor;
-import android.database.sqlite.SQLiteDatabase;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -29,8 +28,7 @@ public final class WeatherWidgetPreferences {
     public static JSONArray cities(Context c) {
         JSONArray out=new JSONArray();
         if(!c.getDatabasePath("weather.db").isFile())return out;
-        try(SQLiteDatabase db=SQLiteDatabase.openDatabase(c.getDatabasePath("weather.db").getAbsolutePath(),null,
-                    SQLiteDatabase.OPEN_READONLY|SQLiteDatabase.NO_LOCALIZED_COLLATORS);
+        try(WeatherReadDatabase db=WeatherReadDatabase.open(c);
             Cursor rows=db.rawQuery("SELECT posID,name,flag FROM selectedcity ORDER BY position ASC,flag DESC",null)) {
             while(rows.moveToNext()) {
                 String id=rows.isNull(0)?"":rows.getString(0), name=rows.isNull(1)?"":rows.getString(1);
@@ -56,6 +54,11 @@ public final class WeatherWidgetPreferences {
         String explicit=cityId(c,id);
         String wanted=explicit.isEmpty()?defaultCityId(c,dual(c,id)):explicit;
         return find(c,wanted,fallback);
+    }
+    static WeatherWidgetData select(Context c,int id,WeatherWidgetExtendedData.Snapshot snapshot) {
+        String explicit=cityId(c,id);
+        String wanted=explicit.isEmpty()?snapshot.defaultCity(dual(c,id)):explicit;
+        return snapshot.city(wanted);
     }
     public static WeatherWidgetData second(Context c,int id,WeatherWidgetData fallback) {
         String wanted=secondCityId(c,id);

@@ -66,9 +66,35 @@ public final class WeatherWebActivity extends Activity {
         error = new LinearLayout(this); error.setOrientation(LinearLayout.VERTICAL); error.setGravity(Gravity.CENTER);
         TextView message = new TextView(this); message.setTextColor(foreground); message.setText("网页暂时无法加载，请检查网络后重试");
         Button retry = new Button(this); retry.setText("重新加载");
-        retry.setOnClickListener(v -> { error.setVisibility(View.GONE); web.setVisibility(View.VISIBLE); web.reload(); });
+        retry.setOnClickListener(v -> {
+            error.setVisibility(View.GONE);
+            if(web==null)requestWebView(root,background,state);
+            else{web.setVisibility(View.VISIBLE);web.reload();}
+        });
         error.addView(message); error.addView(retry); error.setVisibility(View.GONE);
         root.addView(error, new LinearLayout.LayoutParams(-1, 0, 1));
+        setContentView(root);
+        if (Build.VERSION.SDK_INT >= 33) {
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                    android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, this::onBackPressed);
+        }
+        requestWebView(root,background,state);
+    }
+
+    private void requestWebView(LinearLayout root,int background,Bundle state){
+        progress.setVisibility(View.VISIBLE);
+        WeatherWebStartup.whenReady(this,()->{
+            if(isFinishing()||isDestroyed())return;
+            createWebView(root,background,state);
+        },failure->{
+            if(isFinishing()||isDestroyed())return;
+            progress.setVisibility(View.GONE);
+            error.setVisibility(View.VISIBLE);
+            android.util.Log.e("WeatherPages","WebView engine startup failed",failure);
+        });
+    }
+
+    private void createWebView(LinearLayout root,int background,Bundle state){
         web = new WebView(this);
         web.setBackgroundColor(background);
         WebSettings settings = web.getSettings();
@@ -94,11 +120,6 @@ public final class WeatherWebActivity extends Activity {
             }
         });
         root.addView(web, new LinearLayout.LayoutParams(-1, 0, 1));
-        setContentView(root);
-        if (Build.VERSION.SDK_INT >= 33) {
-            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
-                    android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, this::onBackPressed);
-        }
         if (state == null || web.restoreState(state) == null) web.loadUrl(initialUrl);
     }
 

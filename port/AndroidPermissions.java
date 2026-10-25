@@ -45,6 +45,7 @@ public final class AndroidPermissions {
         /** Send a method call, using the permission channel's method codec. */
         void invokeMethod(String channel, String method, Object arguments);
     }
+    public interface GrantResult { void complete(boolean granted); }
 
     private final Activity activity;
     private final EventSink events;
@@ -63,13 +64,18 @@ public final class AndroidPermissions {
         final int code;
         final List<String> permissions;
         final boolean weatherCallback;
+        final GrantResult completion;
         boolean foregroundAttempted;
         boolean backgroundAttempted;
 
         Request(int code, List<String> permissions, boolean weatherCallback) {
+            this(code, permissions, weatherCallback, null);
+        }
+        Request(int code, List<String> permissions, boolean weatherCallback, GrantResult completion) {
             this.code = code;
             this.permissions = permissions;
             this.weatherCallback = weatherCallback;
+            this.completion = completion;
         }
     }
 
@@ -140,6 +146,8 @@ public final class AndroidPermissions {
         main.post(() -> {
             if (destroyed) return;
             queue.add(request);
+            Log.i(TAG, "Queued permission request code=" + request.code
+                    + " legacy=" + request.weatherCallback + " permissions=" + request.permissions);
             next();
         });
     }
@@ -165,6 +173,19 @@ public final class AndroidPermissions {
     public boolean hasForegroundLocation() {
         return checkPermission(COARSE) == PackageManager.PERMISSION_GRANTED
                 || checkPermission(FINE) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    /** A real foreground location operation can request a missing Android grant.
+     * Permission checks remain passive. The same queue serializes Dart requests
+     * and this backend fallback, so Android never receives overlapping dialogs.
+     */
+    public void requestForegroundLocation(GrantResult result) {
+        if (destroyed) return;
+        if (hasForegroundLocation()) {
+            main.post(() -> { if (!destroyed) result.complete(hasForegroundLocation()); });
+            return;
+        }
+        enqueue(new Request(0, Arrays.asList(COARSE, FINE), false, result));
     }
 
     private void next() {
@@ -197,6 +218,7 @@ public final class AndroidPermissions {
             if (!request.isEmpty() && Build.VERSION.SDK_INT >= 23) {
                 try {
                     waitingForRuntime = true;
+                    Log.i(TAG, "Requesting foreground permissions " + request);
                     activity.requestPermissions(request.toArray(new String[0]), RUNTIME_REQUEST);
                 } catch (RuntimeException error) {
                     Log.w(TAG, "System permission request failed", error);
@@ -208,7 +230,14 @@ public final class AndroidPermissions {
         if (!current.backgroundAttempted && current.permissions.contains(BACKGROUND)
                 && shouldRequest(BACKGROUND) && hasForegroundLocation()) {
             current.backgroundAttempted = true;
-            if (Build.VERSION.SDK_INT >= 29) {
+            if (Build.VERSION.SDK_INT >= 30) {
+                // With targetSdk >= 30 Android no longer offers "Allow all the
+                // time" in the runtime dialog. A background-only request can
+                // return denied immediately with no UI; explain the Settings step.
+                Log.i(TAG, "Background location requires the system Settings grant");
+                showBackgroundExplanation();
+                return;
+            } else if (Build.VERSION.SDK_INT >= 29) {
                 try {
                     waitingForRuntime = true;
                     activity.requestPermissions(new String[]{BACKGROUND}, RUNTIME_REQUEST);
@@ -271,6 +300,8 @@ public final class AndroidPermissions {
     /** Forward Activity.onRequestPermissionsResult. Return true when consumed. */
     public boolean onRequestPermissionsResult(int code, String[] permissions, int[] results) {
         if (code != RUNTIME_REQUEST) return false;
+        Log.i(TAG, "Runtime permission result names=" + Arrays.toString(permissions)
+                + " grants=" + Arrays.toString(results) + " resumed=" + resumed);
         // Read grants again, including coarse vs. fine, so dismissal is never success.
         waitingForRuntime = false;
         Request completedStage = current;
@@ -329,6 +360,15 @@ public final class AndroidPermissions {
         current = null;
         waitingForRuntime = false;
         waitingForSettings = false;
+        if (completed.completion != null) {
+            // Defer until the Activity's onResume finishes before starting the
+            // location backend. A permission dialog itself pauses that Activity.
+            main.post(() -> {
+                if (!destroyed) completed.completion.complete(hasForegroundLocation());
+            });
+            main.post(this::next);
+            return;
+        }
         List<Integer> grants = new ArrayList<>();
         for (String permission : completed.permissions) grants.add(checkPermission(permission));
         Map<String, Object> arguments = new LinkedHashMap<>();

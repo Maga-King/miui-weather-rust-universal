@@ -17,21 +17,31 @@ final class AndroidTextInput {
     int client=-1;
     JSONObject configuration=new JSONObject();
     boolean updating;
+    InputConnection activeConnection;
+    private final android.text.method.BaseKeyListener deleteKeys=new android.text.method.BaseKeyListener(){
+        @Override public int getInputType(){return android.text.InputType.TYPE_CLASS_TEXT;}
+    };
     AndroidTextInput(Activity activity,Sender sender){
         this.activity=activity;this.sender=sender;manager=(InputMethodManager)activity.getSystemService(Activity.INPUT_METHOD_SERVICE);
     }
     Object handle(String method,Object arguments)throws JSONException{
         if(method.equals("TextInput.setClient")){
-            JSONArray a=(JSONArray)arguments;client=a.getInt(0);configuration=a.getJSONObject(1);manager.restartInput(view);
+            JSONArray a=(JSONArray)arguments;client=a.getInt(0);configuration=a.getJSONObject(1);activeConnection=null;manager.restartInput(view);
         }else if(method.equals("TextInput.setEditingState")){
             JSONObject a=(JSONObject)arguments;updating=true;
-            editable.replace(0,editable.length(),a.optString("text"));
+            String value=a.optString("text");
+            if(!value.contentEquals(editable))editable.replace(0,editable.length(),value);
             int base=a.optInt("selectionBase",editable.length()),extent=a.optInt("selectionExtent",base);
             if(base>=0&&extent>=0)Selection.setSelection(editable,Math.min(base,editable.length()),Math.min(extent,editable.length()));
-            updating=false;manager.updateSelection(view,Selection.getSelectionStart(editable),Selection.getSelectionEnd(editable),-1,-1);
+            if(a.has("composingBase")&&a.has("composingExtent")){
+                int from=a.optInt("composingBase",-1),to=a.optInt("composingExtent",-1);
+                if(from>=0&&to>from&&to<=editable.length()&&activeConnection!=null)activeConnection.setComposingRegion(from,to);
+                else BaseInputConnection.removeComposingSpans(editable);
+            }
+            updating=false;updateSelection();
         }else if(method.equals("TextInput.show")){view.requestFocus();manager.showSoftInput(view,0);}
         else if(method.equals("TextInput.hide")){manager.hideSoftInputFromWindow(view.getWindowToken(),0);}
-        else if(method.equals("TextInput.clearClient")){client=-1;}
+        else if(method.equals("TextInput.clearClient")){client=-1;activeConnection=null;}
         return null;
     }
     InputConnection connection(EditorInfo info){
@@ -47,7 +57,7 @@ final class AndroidTextInput {
         int code=action.endsWith("search")?EditorInfo.IME_ACTION_SEARCH:action.endsWith("go")?EditorInfo.IME_ACTION_GO:action.endsWith("next")?EditorInfo.IME_ACTION_NEXT:action.endsWith("send")?EditorInfo.IME_ACTION_SEND:EditorInfo.IME_ACTION_DONE;
         info.imeOptions=code|EditorInfo.IME_FLAG_NO_EXTRACT_UI;
         info.initialSelStart=Math.max(0,Selection.getSelectionStart(editable));info.initialSelEnd=Math.max(0,Selection.getSelectionEnd(editable));
-        return new BaseInputConnection(view,true){
+        return activeConnection=new BaseInputConnection(view,true){
             private int batch;
             @Override public Editable getEditable(){return editable;}
             @Override public boolean beginBatchEdit(){batch++;return true;}
@@ -56,12 +66,35 @@ final class AndroidTextInput {
             @Override public boolean setComposingText(CharSequence text,int cursor){boolean ok=super.setComposingText(text,cursor);if(batch==0)changed();return ok;}
             @Override public boolean finishComposingText(){boolean ok=super.finishComposingText();if(batch==0)changed();return ok;}
             @Override public boolean deleteSurroundingText(int before,int after){boolean ok=super.deleteSurroundingText(before,after);if(batch==0)changed();return ok;}
+            @Override public boolean deleteSurroundingTextInCodePoints(int before,int after){boolean ok=super.deleteSurroundingTextInCodePoints(before,after);if(batch==0)changed();return ok;}
+            @Override public boolean setComposingRegion(int start,int end){boolean ok=super.setComposingRegion(start,end);if(batch==0)changed();return ok;}
+            @Override public boolean sendKeyEvent(KeyEvent event){
+                if(!isDeleteKey(event))return super.sendKeyEvent(event);
+                if(event.getAction()==KeyEvent.ACTION_DOWN){
+                    // Let Android handle selections, surrogate pairs and repeat keys.
+                    deleteKeys.onKeyDown(view,editable,event.getKeyCode(),event);
+                    if(batch==0)changed();
+                }
+                return true;
+            }
             @Override public boolean setSelection(int start,int end){boolean ok=super.setSelection(start,end);if(batch==0)changed();return ok;}
             @Override public boolean performEditorAction(int actionCode){try{sender.send("flutter/textinput",new JSONObject().put("method","TextInputClient.performAction").put("args",new JSONArray().put(client).put(action)).toString());}catch(JSONException ignored){}return true;}
         };
     }
+    private static boolean isDeleteKey(KeyEvent event){
+        return (event.getKeyCode()==KeyEvent.KEYCODE_DEL||event.getKeyCode()==KeyEvent.KEYCODE_FORWARD_DEL)
+                &&(event.getAction()==KeyEvent.ACTION_DOWN||event.getAction()==KeyEvent.ACTION_UP);
+    }
+    boolean handleKeyEvent(KeyEvent event){
+        return client>=0&&activeConnection!=null&&isDeleteKey(event)&&activeConnection.sendKeyEvent(event);
+    }
+    private void updateSelection(){
+        manager.updateSelection(view,Selection.getSelectionStart(editable),Selection.getSelectionEnd(editable),
+                BaseInputConnection.getComposingSpanStart(editable),BaseInputConnection.getComposingSpanEnd(editable));
+    }
     private void changed(){
         if(updating||client<0)return;
+        updateSelection();
         try{
             JSONObject state=new JSONObject().put("text",editable.toString()).put("selectionBase",Selection.getSelectionStart(editable)).put("selectionExtent",Selection.getSelectionEnd(editable)).put("selectionAffinity","TextAffinity.downstream").put("selectionIsDirectional",false).put("composingBase",BaseInputConnection.getComposingSpanStart(editable)).put("composingExtent",BaseInputConnection.getComposingSpanEnd(editable));
             sender.send("flutter/textinput",new JSONObject().put("method","TextInputClient.updateEditingState").put("args",new JSONArray().put(client).put(state)).toString());

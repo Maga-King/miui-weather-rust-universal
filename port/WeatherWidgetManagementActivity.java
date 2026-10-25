@@ -17,15 +17,13 @@ import org.json.JSONObject;
 
 /** Enumerates actual launcher instances without creating or removing widgets. */
 public final class WeatherWidgetManagementActivity extends WeatherWidgetSettingsActivity {
-    private static final String[] PROVIDERS={"WeatherWidgetProvider","WeatherDualCityWidgetProvider","WeatherHourlyWidgetProvider","WeatherSmallWidgetProvider","WeatherCustomWidgetProvider","WeatherDailyWidgetProvider","WeatherCompleteWidgetProvider","WeatherSunWidgetProvider"};
-
     @Override public void onResume() {
         super.onResume();setTitle(chinese?"管理小组件":"Manage widgets");
         LinearLayout list=page();refreshInterval(list);
         AppWidgetManager manager=AppWidgetManager.getInstance(this);
         ArrayList<Integer> instances=new ArrayList<>();
-        for(String name:PROVIDERS) {
-            int[] ids=manager.getAppWidgetIds(new ComponentName(getPackageName(),"dev.weather.oneplus."+name));
+        for(Class<?> provider:WeatherWidgetCatalog.PROVIDERS) {
+            int[] ids=manager.getAppWidgetIds(new ComponentName(this,provider));
             Arrays.sort(ids);for(int id:ids)instances.add(id);
         }
         note(list,chinese?"桌面已添加 "+instances.size()+" 个小组件":"Widgets on your home screen: "+instances.size());

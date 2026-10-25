@@ -20,9 +20,7 @@ import java.util.Map;
 
 /** Ordinary Android AppWidget. The original card's only tap target opens Weather. */
 public class WeatherWidgetProvider extends AppWidgetProvider {
-    private static final Class<?>[] PROVIDERS={WeatherWidgetProvider.class,WeatherDualCityWidgetProvider.class,
-        WeatherHourlyWidgetProvider.class,WeatherSmallWidgetProvider.class,WeatherCustomWidgetProvider.class,
-        WeatherDailyWidgetProvider.class,WeatherCompleteWidgetProvider.class,WeatherSunWidgetProvider.class};
+    private static final Class<?>[] PROVIDERS=WeatherWidgetCatalog.PROVIDERS;
     private static final Map<Integer,String> DRAWN=new LinkedHashMap<Integer,String>(32,.75f,true) {
         @Override protected boolean removeEldestEntry(Map.Entry<Integer,String> entry) { return size()>128; }
     };
@@ -70,13 +68,20 @@ public class WeatherWidgetProvider extends AppWidgetProvider {
     public static synchronized void updateAll(Context context) {
         context=context.getApplicationContext();
         AppWidgetManager manager=AppWidgetManager.getInstance(context);
-        for(int style=0;style<PROVIDERS.length;style++)update(context,manager,ids(context,PROVIDERS[style]),style);
+        WeatherWidgetExtendedData.Snapshot snapshot=null;
+        for(int style=0;style<PROVIDERS.length;style++) {
+            int[] widgets=ids(context,PROVIDERS[style]);
+            if(widgets.length==0)continue;
+            if(snapshot==null)snapshot=readSnapshot(context);
+            update(context,manager,widgets,style,snapshot);
+        }
     }
     private static synchronized void update(Context context, AppWidgetManager manager, int[] ids,int style) {
         if (ids.length == 0) return;
         context=context.getApplicationContext();
-        int layout = resource(context, "layout", "weather_widget");
-        int image = resource(context, "id", "weather_widget_image");
+        update(context,manager,ids,style,readSnapshot(context));
+    }
+    private static WeatherWidgetExtendedData.Snapshot readSnapshot(Context context) {
         WeatherWidgetData data = null;
         try {
             WeatherRefreshSource source = WeatherRefresh.source(context);
@@ -85,18 +90,25 @@ public class WeatherWidgetProvider extends AppWidgetProvider {
             Log.w("WeatherWidget", "Cannot read local widget data", error);
         }
         if (data == null) data = WeatherWidgetCache.read(context);
+        return WeatherWidgetExtendedData.snapshot(context,data);
+    }
+    private static void update(Context context, AppWidgetManager manager, int[] ids,int style,
+            WeatherWidgetExtendedData.Snapshot snapshot) {
+        int layout = resource(context, "layout", "weather_widget");
+        int image = resource(context, "id", "weather_widget_image");
         WeatherWidgetRenderer renderer = null;
         WeatherCardWidgetRenderer cards=null;
+        WeatherOxygenWidgetRenderer oxygen=null;
         Intent launch = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
         if (launch == null) launch = new Intent(context, WeatherActivity.class);
         launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         PendingIntent open = PendingIntent.getActivity(context, 0, launch, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        long now=System.currentTimeMillis();
+        long now=snapshot.now;
         for (int id : ids) {
-            WeatherWidgetData instance=WeatherWidgetPreferences.select(context,id,data);
+            WeatherWidgetData instance=WeatherWidgetPreferences.select(context,id,snapshot);
             org.json.JSONObject details=null;
             if(style!=0)try {
-                details=WeatherWidgetExtendedData.read(context,instance);
+                details=snapshot.details(instance);
                 details.put("panel",WeatherWidgetPreferences.panel(context,id));
                 details.put("secondCityId",WeatherWidgetPreferences.secondCityId(context,id));
             } catch(Exception error){Log.w("WeatherWidget","Cannot read extended weather cache",error);}
@@ -105,12 +117,14 @@ public class WeatherWidgetProvider extends AppWidgetProvider {
             String signature=signature(context,style,instance,details,sizes,now);
             if(signature.equals(DRAWN.get(id)))continue;
             if(style==0&&renderer==null)renderer=new WeatherWidgetRenderer(context);
-            if(style!=0&&cards==null)cards=new WeatherCardWidgetRenderer(context);
+            if(style!=0&&!WeatherWidgetCatalog.isOxygen(style)&&cards==null)cards=new WeatherCardWidgetRenderer(context);
+            if(WeatherWidgetCatalog.isOxygen(style)&&oxygen==null)oxygen=new WeatherOxygenWidgetRenderer(context);
             Map<SizeF,RemoteViews> variants=new LinkedHashMap<>();
             List<Bitmap> rendered=new ArrayList<>();
             try {
                 for(WeatherWidgetSizing.Size size:sizes) {
-                    Bitmap bitmap=style==0?renderer.render(instance,now,size.width,size.height)
+                    Bitmap bitmap=WeatherWidgetCatalog.isOxygen(style)?oxygen.render(style,instance,details,now,size.width,size.height)
+                        :style==0?renderer.render(instance,now,size.width,size.height)
                         :cards.render(style,instance,details,now,size.width,size.height);
                     rendered.add(bitmap);
                     RemoteViews views=new RemoteViews(context.getPackageName(),layout);
@@ -132,7 +146,10 @@ public class WeatherWidgetProvider extends AppWidgetProvider {
     private static String signature(Context context,int style,WeatherWidgetData data,
             org.json.JSONObject details,List<WeatherWidgetSizing.Size> sizes,long now) {
         try {
-            String state=style+"|"+(now/60000)+"|"+context.getResources().getConfiguration()
+            // A Xiaomi sky phase can change halfway through a minute. Its
+            // original time trigger must not be suppressed by the minute cache.
+            int phase=WeatherWidgetCatalog.isOxygen(style)?-1:WeatherWidgetRenderer.duration(data,now);
+            String state=style+"|"+(now/60000)+"|"+phase+"|"+context.getResources().getConfiguration()
                 +"|"+sizes+"|"+(data==null?"":data.toJson())+"|"+details;
             return android.util.Base64.encodeToString(java.security.MessageDigest.getInstance("SHA-256")
                 .digest(state.getBytes(java.nio.charset.StandardCharsets.UTF_8)),android.util.Base64.NO_WRAP);

@@ -18,11 +18,13 @@ public final class MajesticSurface implements SurfaceHolder.Callback,AutoCloseab
     private final Handler main=new Handler(Looper.getMainLooper());
     private final Choreographer choreographer=Choreographer.getInstance();
     private final SurfaceView view;
+    private final Activity activity;
     private final WeatherRenderPreferences.Session renderSession;
     private long generation;
     private boolean available,closed;
-    private boolean resumed=true,copyPending;
-    private boolean resolutionRecreationPending;
+    private boolean resumed=true,copyPending,copyScheduled;
+    private boolean startupPending=true;
+    private Runnable firstBackdropReady;
     private Bitmap glassBackdrop;
     private native void nativeGlassBackdrop(Bitmap pixels);
     private final Choreographer.FrameCallback copyGlassBackdrop=frameTimeNanos->copyGlassBackdrop();
@@ -31,6 +33,7 @@ public final class MajesticSurface implements SurfaceHolder.Callback,AutoCloseab
     private native void nativeWindow(long generation,Surface surface);
 
     public MajesticSurface(Activity activity,FrameLayout root,SurfaceView flutter) {
+        this.activity=activity;
         view=new SurfaceView(activity);
         view.setFocusable(false);view.setClickable(false);
         view.getHolder().setFormat(PixelFormat.RGB_888);
@@ -38,28 +41,30 @@ public final class MajesticSurface implements SurfaceHolder.Callback,AutoCloseab
         root.addView(view,0,new FrameLayout.LayoutParams(-1,-1));
         flutter.setZOrderMediaOverlay(true);
         flutter.getHolder().setFormat(PixelFormat.TRANSLUCENT);
-        renderSession=new WeatherRenderPreferences.Session(activity,flutter,view,this::recreateResolutionSurface);
+        renderSession=new WeatherRenderPreferences.Session(activity,flutter,view);
         nativeBind();
     }
 
     public void attach(){if(!closed){resumed=true;renderSession.resume();nativeBind();scheduleGlassCopy();}}
-    public void pause(){resumed=false;renderSession.pause();choreographer.removeFrameCallback(copyGlassBackdrop);}
-    private void recreateResolutionSurface(){
-        if(closed||!available||generation==0||resolutionRecreationPending)return;
-        // A real Surface lifecycle makes nativeWindowCreated rebuild the original
-        // scene's render targets using the new render scale. Layout size is unchanged.
-        resolutionRecreationPending=true;
-        view.setVisibility(SurfaceView.INVISIBLE);
+    public void pause(){resumed=false;renderSession.pause();choreographer.removeFrameCallback(copyGlassBackdrop);copyScheduled=false;}
+    public void prepareStartupBackdrop(Runnable ready){
+        if(closed||generation==0||!available){ready.run();return;}
+        firstBackdropReady=ready;startupPending=false;scheduleGlassCopy();
     }
+    public void finishStartup(){startupPending=false;firstBackdropReady=null;scheduleGlassCopy();}
     private void scheduleGlassCopy(){
-        choreographer.removeFrameCallback(copyGlassBackdrop);
         // One copy in flight; sample the next physical display frame after it
         // completes. No fixed 100 ms cap, accumulated work, or synthetic timer.
-        if(!closed&&resumed)choreographer.postFrameCallback(copyGlassBackdrop);
+        if(!closed&&resumed&&!startupPending&&!copyPending&&!copyScheduled){
+            copyScheduled=true;
+            choreographer.postFrameCallback(copyGlassBackdrop);
+        }
     }
     private void copyGlassBackdrop(){
+        copyScheduled=false;
         if(closed||!resumed)return;
-        if(copyPending||!available||generation==0||!view.isShown()||!view.getHolder().getSurface().isValid()){scheduleGlassCopy();return;}
+        if(copyPending)return;
+        if(!available||generation==0||!view.isShown()||!view.getHolder().getSurface().isValid()){scheduleGlassCopy();return;}
         int width=view.getWidth(),height=view.getHeight();
         if(width<=0||height<=0){scheduleGlassCopy();return;}
         if(glassBackdrop==null||glassBackdrop.getWidth()!=width||glassBackdrop.getHeight()!=height){
@@ -71,7 +76,11 @@ public final class MajesticSurface implements SurfaceHolder.Callback,AutoCloseab
         copyPending=true;
         try{PixelCopy.request(view,frame,result->{
             copyPending=false;
-            if(!closed&&resumed&&available&&generation==request&&result==PixelCopy.SUCCESS)nativeGlassBackdrop(frame);
+            if(!closed&&resumed&&available&&generation==request&&result==PixelCopy.SUCCESS){
+                nativeGlassBackdrop(frame);
+                Runnable ready=firstBackdropReady;firstBackdropReady=null;
+                if(ready!=null)ready.run();
+            }
             if(closed){frame.recycle();glassBackdrop=null;}else scheduleGlassCopy();
         },main);}catch(IllegalArgumentException error){copyPending=false;scheduleGlassCopy();}
     }
@@ -80,13 +89,22 @@ public final class MajesticSurface implements SurfaceHolder.Callback,AutoCloseab
     public void requestSurface(long request,int width,int height,float x,float y) {
         main.post(()->{
             if(closed)return;
+            long previousGeneration=generation;
             generation=request;
+            if(activity instanceof WeatherActivity)((WeatherActivity)activity).onWeatherSceneRequested();
             FrameLayout.LayoutParams params=(FrameLayout.LayoutParams)view.getLayoutParams();
-            params.width=width>0?width:-1;params.height=height>0?height:-1;
-            params.leftMargin=Math.round(x);params.topMargin=Math.round(y);
-            view.setLayoutParams(params);
-            if(!resolutionRecreationPending)view.setVisibility(SurfaceView.VISIBLE);
-            Log.i("WeatherMGL","Requested original animation surface "+width+"x"+height+" generation="+request);
+            int nextWidth=width>0?width:-1,nextHeight=height>0?height:-1;
+            int nextLeft=Math.round(x),nextTop=Math.round(y);
+            boolean layoutChanged=params.width!=nextWidth||params.height!=nextHeight||
+                params.leftMargin!=nextLeft||params.topMargin!=nextTop;
+            if(layoutChanged){
+                params.width=nextWidth;params.height=nextHeight;
+                params.leftMargin=nextLeft;params.topMargin=nextTop;
+                view.setLayoutParams(params);
+            }
+            if(view.getVisibility()!=SurfaceView.VISIBLE)view.setVisibility(SurfaceView.VISIBLE);
+            if(layoutChanged||previousGeneration!=request)
+                Log.i("WeatherMGL","Requested original animation surface "+width+"x"+height+" generation="+request);
             if(available&&view.getHolder().getSurface().isValid())
                 nativeWindow(generation,view.getHolder().getSurface());
             scheduleGlassCopy();
@@ -96,7 +114,8 @@ public final class MajesticSurface implements SurfaceHolder.Callback,AutoCloseab
     public void hideSurface(long request) {
         main.post(()->{
             if(closed||generation!=request)return;
-            generation=0;view.setVisibility(SurfaceView.INVISIBLE);
+            generation=0;
+            if(view.getVisibility()!=SurfaceView.INVISIBLE)view.setVisibility(SurfaceView.INVISIBLE);
         });
     }
 
@@ -110,16 +129,14 @@ public final class MajesticSurface implements SurfaceHolder.Callback,AutoCloseab
     @Override public void surfaceDestroyed(SurfaceHolder holder) {
         available=false;
         choreographer.removeFrameCallback(copyGlassBackdrop);
+        copyScheduled=false;
         if(!closed&&generation!=0)nativeWindow(generation,null);
-        if(resolutionRecreationPending){
-            resolutionRecreationPending=false;
-            main.post(()->{if(!closed&&generation!=0)view.setVisibility(SurfaceView.VISIBLE);});
-        }
     }
     @Override public void close() {
         if(closed)return;
-        closed=true;renderSession.close();nativeUnbind();
+        closed=true;firstBackdropReady=null;renderSession.close();nativeUnbind();
         choreographer.removeFrameCallback(copyGlassBackdrop);
+        copyScheduled=false;
         if(!copyPending&&glassBackdrop!=null){glassBackdrop.recycle();glassBackdrop=null;}
         view.getHolder().removeCallback(this);
     }

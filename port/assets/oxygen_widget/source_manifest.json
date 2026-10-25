@@ -1,0 +1,367 @@
+{
+  "package": "net.oneplus.weather",
+  "version": "16.40.4",
+  "resource_count": 60,
+  "resources": [
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_sunday_dawn_small_16_bg.webp",
+      "destination": "assets/oxygen_widget/backgrounds/weather_quick_card_sunday_dawn_small_16_bg.webp",
+      "bytes": 36108,
+      "sha256": "e55d60bbc177040ec086628345928116570b36270f7873d7b154b385a9c2dd91"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_sunday_morning_small_16_bg.webp",
+      "destination": "assets/oxygen_widget/backgrounds/weather_quick_card_sunday_morning_small_16_bg.webp",
+      "bytes": 35200,
+      "sha256": "9a6a3a1779ff6f6321bdc680c8126e19afbf2a64f94bc87a0e347fd04a46904d"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_sunday_noon_small_16_bg.webp",
+      "destination": "assets/oxygen_widget/backgrounds/weather_quick_card_sunday_noon_small_16_bg.webp",
+      "bytes": 2750,
+      "sha256": "8ddaaada4a92d247e8497b61b6dea12b46cf76a3f44ad65cf9cfae5edde8ce69"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_sunday_af_small_16_bg.webp",
+      "destination": "assets/oxygen_widget/backgrounds/weather_quick_card_sunday_af_small_16_bg.webp",
+      "bytes": 2668,
+      "sha256": "f9d5e62969e588649f731a5f68b46efba055738781577c1802c6c1b95c314880"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_sunday_nightfall_small_16_bg.webp",
+      "destination": "assets/oxygen_widget/backgrounds/weather_quick_card_sunday_nightfall_small_16_bg.webp",
+      "bytes": 35764,
+      "sha256": "ba8324a0054fe2770d2e6e9774a3855b13dcb148f77e7b01d79edb724f7ee287"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_sunday_night_small_16_bg.webp",
+      "destination": "assets/oxygen_widget/backgrounds/weather_quick_card_sunday_night_small_16_bg.webp",
+      "bytes": 40372,
+      "sha256": "8b87db255d684d0d4f913b151610b449e595639257c5173de4542294927c3789"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_cloudy_morning_small_16_bg.webp",
+      "destination": "assets/oxygen_widget/backgrounds/weather_quick_card_cloudy_morning_small_16_bg.webp",
+      "bytes": 12720,
+      "sha256": "e6ed50b30df5b107c2f1031584fb4b1f2d6dbf90ebfd31ba0dc4285b28da62c8"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_cloudy_noon_small_16_bg.webp",
+      "destination": "assets/oxygen_widget/backgrounds/weather_quick_card_cloudy_noon_small_16_bg.webp",
+      "bytes": 11840,
+      "sha256": "3575e786ea6e457c20d00f0bf582ecda8416b90b0d3cc0a29ad884be17b73931"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_cloudy_af_small_16_bg.webp",
+      "destination": "assets/oxygen_widget/backgrounds/weather_quick_card_cloudy_af_small_16_bg.webp",
+      "bytes": 11526,
+      "sha256": "90b83bad1e30a3fb58f6b362019c54ea0906e6f7fea3cbe3d63a82ff4f258e41"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_cloudy_nightfall_small_16_bg.webp",
+      "destination": "assets/oxygen_widget/backgrounds/weather_quick_card_cloudy_nightfall_small_16_bg.webp",
+      "bytes": 12790,
+      "sha256": "21070dd49a66a286404a85ee9edb2e64ebeb00c08451a6484808fb0802103b64"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_cloudy_night_small_16_bg.webp",
+      "destination": "assets/oxygen_widget/backgrounds/weather_quick_card_cloudy_night_small_16_bg.webp",
+      "bytes": 11666,
+      "sha256": "ca326d9d32b53e73490c6abd870bba509866f5d705d2e43bec12ff7dd8eeaf02"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_overcast_morning_small_16_bg.webp",
+      "destination": "assets/oxygen_widget/backgrounds/weather_quick_card_overcast_morning_small_16_bg.webp",
+      "bytes": 21552,
+      "sha256": "ba492f5ef225c648abc33dd509ff637315aa030b2b8059f44bfb6235dffa9a9c"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_overcast_noon_small_16_bg.webp",
+      "destination": "assets/oxygen_widget/backgrounds/weather_quick_card_overcast_noon_small_16_bg.webp",
+      "bytes": 21306,
+      "sha256": "f2962471f9c8e6153c0f251343fbd7296d003dce24d9ae5117abf6e5c43d2484"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_overcast_nightfall_small_16_bg.webp",
+      "destination": "assets/oxygen_widget/backgrounds/weather_quick_card_overcast_nightfall_small_16_bg.webp",
+      "bytes": 21592,
+      "sha256": "57962efd394ab29be69cac3ca11d6725efe9aefc7b141c302f2b1806db1a17b0"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_overcast_night_small_16_bg.webp",
+      "destination": "assets/oxygen_widget/backgrounds/weather_quick_card_overcast_night_small_16_bg.webp",
+      "bytes": 21718,
+      "sha256": "0f31575b6c8703ac0df98abdab7c775165172b7a37a5fc06bba6f2e209736393"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_fog_noon_night_small_16_bg.webp",
+      "destination": "assets/oxygen_widget/backgrounds/weather_quick_card_fog_noon_night_small_16_bg.webp",
+      "bytes": 28414,
+      "sha256": "8500d01eb676922c1c89714db7abc27ec57c725d077c9c06c3dbfeed92e83cf0"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_fog_night_small_16_bg.webp",
+      "destination": "assets/oxygen_widget/backgrounds/weather_quick_card_fog_night_small_16_bg.webp",
+      "bytes": 22720,
+      "sha256": "c9919dc281dcd944e54fd227bb9123a36676ed8d54eed2f2ae7f06ac0aee2421"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_heavy_rain_noon_small_16_bg.webp",
+      "destination": "assets/oxygen_widget/backgrounds/weather_quick_card_heavy_rain_noon_small_16_bg.webp",
+      "bytes": 7202,
+      "sha256": "50884cdb2867050e94a0014189169a28ce1840ca1a8c632048d914795f06c65c"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_thunderstorm_noon_small_16_bg.webp",
+      "destination": "assets/oxygen_widget/backgrounds/weather_quick_card_thunderstorm_noon_small_16_bg.webp",
+      "bytes": 54162,
+      "sha256": "07a9238af2c8396b9d33db217e52fa6bb10a89ac892595879642059a206facec"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_thundershower_small_16_bg.webp",
+      "destination": "assets/oxygen_widget/backgrounds/weather_quick_card_thundershower_small_16_bg.webp",
+      "bytes": 55618,
+      "sha256": "c22cc5b4f0a324ac24108aa13372ae10b51209faa7601aea2d0d57aec64425ee"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_middle_rain_noon_small_16_bg.webp",
+      "destination": "assets/oxygen_widget/backgrounds/weather_quick_card_middle_rain_noon_small_16_bg.webp",
+      "bytes": 5252,
+      "sha256": "cbf98208ccb4dab12d730c1eaa3623ecb4c9479317261f25f2797002826d6a54"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_rain_noon_small_16_bg.webp",
+      "destination": "assets/oxygen_widget/backgrounds/weather_quick_card_rain_noon_small_16_bg.webp",
+      "bytes": 3630,
+      "sha256": "9371c45df613e7f3b7a5a1b303e38417cdc3ca139638f7afe26f41c622a21da7"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_sleeting_small_16_bg.webp",
+      "destination": "assets/oxygen_widget/backgrounds/weather_quick_card_sleeting_small_16_bg.webp",
+      "bytes": 7864,
+      "sha256": "cf4946bd4eeded5509790c45f2ab470cac33d3b2b53ab56a035f051ba8695856"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_heavy_snow_noon_small_16_bg.webp",
+      "destination": "assets/oxygen_widget/backgrounds/weather_quick_card_heavy_snow_noon_small_16_bg.webp",
+      "bytes": 5950,
+      "sha256": "b013e22d43fcbcf45380d90d2f6a2921f697a221bf9d29348c3fac5a595592e7"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_light_snow_noon_small_16_bg.webp",
+      "destination": "assets/oxygen_widget/backgrounds/weather_quick_card_light_snow_noon_small_16_bg.webp",
+      "bytes": 3350,
+      "sha256": "fa155f330f9e91cec0beb881954ff7fc658ac19d89dcc5d384db5a0e920a8698"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_middle_snow_noon_small_16_bg.webp",
+      "destination": "assets/oxygen_widget/backgrounds/weather_quick_card_middle_snow_noon_small_16_bg.webp",
+      "bytes": 3884,
+      "sha256": "4a9cc8cc77fceac083dc232367dcdf0ce2af59263439ca502283105e94cd5f98"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_sand_dust_small_16_bg.webp",
+      "destination": "assets/oxygen_widget/backgrounds/weather_quick_card_sand_dust_small_16_bg.webp",
+      "bytes": 6946,
+      "sha256": "b305a219e7c05a6290b42b5093e43ca724c7b902f6875f7be848a2dc8d170547"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_hail_noon_small_16_bg.webp",
+      "destination": "assets/oxygen_widget/backgrounds/weather_quick_card_hail_noon_small_16_bg.webp",
+      "bytes": 2544,
+      "sha256": "7ccfe0392e9a0923d08d6e64b963998291e204961a296dd2b21e17399bf90f86"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_smog_small_16_bg.webp",
+      "destination": "assets/oxygen_widget/backgrounds/weather_quick_card_smog_small_16_bg.webp",
+      "bytes": 27042,
+      "sha256": "9737891b2c1ed90b1a559bb9d97904ec5185e1e12593440baf13ab0e73f7696b"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_smog_night_small_16_bg.webp",
+      "destination": "assets/oxygen_widget/backgrounds/weather_quick_card_smog_night_small_16_bg.webp",
+      "bytes": 22268,
+      "sha256": "c1650262ec216b3f30e2440e5d1b13e8488346acd3757ed197f61d29f21f6f2c"
+    },
+    {
+      "source": "res/drawable-xxhdpi/card_sunny.webp",
+      "destination": "assets/oxygen_widget/icons/card_sunny.webp",
+      "bytes": 1216,
+      "sha256": "dda2374e49e2cd7c373ef1c1d9f13c1399ad89566d5c1c5a82535d39c64890fa"
+    },
+    {
+      "source": "res/drawable-xxhdpi/card_sunny_night.webp",
+      "destination": "assets/oxygen_widget/icons/card_sunny_night.webp",
+      "bytes": 1304,
+      "sha256": "5a038c7f07c2fe898ac94a2da6a28fd161d3d8a754281effbac702a72f22c44a"
+    },
+    {
+      "source": "res/drawable-xxhdpi/card_cloudy.webp",
+      "destination": "assets/oxygen_widget/icons/card_cloudy.webp",
+      "bytes": 826,
+      "sha256": "69f0d21b392bb000568cb35853293caa69b44d38a838925484873f5fb4fc107f"
+    },
+    {
+      "source": "res/drawable-xxhdpi/card_cloudy_night.webp",
+      "destination": "assets/oxygen_widget/icons/card_cloudy_night.webp",
+      "bytes": 906,
+      "sha256": "55ef43b06a4f1e5b8e12f5d4aaaf9fbd16ea263a1d5ae1125bd80e3b9886dca0"
+    },
+    {
+      "source": "res/drawable-xxhdpi/card_overcast.webp",
+      "destination": "assets/oxygen_widget/icons/card_overcast.webp",
+      "bytes": 474,
+      "sha256": "8bbb27ea7fed0dbc26bd3524f46f4229bd8eeeccad47409330a7f2585cafee36"
+    },
+    {
+      "source": "res/drawable-xxhdpi/card_fog.webp",
+      "destination": "assets/oxygen_widget/icons/card_fog.webp",
+      "bytes": 550,
+      "sha256": "bdb64718a20230b5c6f5897843d78022fdec37ae5949863be03024d33c6b0e5b"
+    },
+    {
+      "source": "res/drawable-xxhdpi/card_storm.webp",
+      "destination": "assets/oxygen_widget/icons/card_storm.webp",
+      "bytes": 878,
+      "sha256": "15e4ec60ca2ebcb192c85647d9f0955d7fedfa9b5dc47f55b313c85720b25958"
+    },
+    {
+      "source": "res/drawable-xxhdpi/card_thunder_storm.webp",
+      "destination": "assets/oxygen_widget/icons/card_thunder_storm.webp",
+      "bytes": 706,
+      "sha256": "c3b16d4ba7dd623c06c508d0866ad54f5a30105453bf9898f78f32fe7e977d3c"
+    },
+    {
+      "source": "res/drawable-xxhdpi/card_thunder_shower.webp",
+      "destination": "assets/oxygen_widget/icons/card_thunder_shower.webp",
+      "bytes": 706,
+      "sha256": "c3b16d4ba7dd623c06c508d0866ad54f5a30105453bf9898f78f32fe7e977d3c"
+    },
+    {
+      "source": "res/drawable-xxhdpi/card_heavy_rain.webp",
+      "destination": "assets/oxygen_widget/icons/card_heavy_rain.webp",
+      "bytes": 710,
+      "sha256": "498586d4dc5e86509c61facef3e97edfa05a674de62222552d5ff337c6ddf0cf"
+    },
+    {
+      "source": "res/drawable-xxhdpi/card_middle_rain.webp",
+      "destination": "assets/oxygen_widget/icons/card_middle_rain.webp",
+      "bytes": 648,
+      "sha256": "503e9222ec5c060336f3228a3f66b1c04ec1022a2cc60dfbc9d671358c2d6e55"
+    },
+    {
+      "source": "res/drawable-xxhdpi/card_light_rain.webp",
+      "destination": "assets/oxygen_widget/icons/card_light_rain.webp",
+      "bytes": 598,
+      "sha256": "f7a6b43cdd7384706e3876fded2cda457a968dd43d5c169bc5382d734c2862f6"
+    },
+    {
+      "source": "res/drawable-xxhdpi/card_sleet.webp",
+      "destination": "assets/oxygen_widget/icons/card_sleet.webp",
+      "bytes": 676,
+      "sha256": "505f11b44450654b776c05519ed8d35505dd79884a861f5a9dc0e3e2f6d028f1"
+    },
+    {
+      "source": "res/drawable-xxhdpi/card_heavy_snow.webp",
+      "destination": "assets/oxygen_widget/icons/card_heavy_snow.webp",
+      "bytes": 766,
+      "sha256": "efacdc08a7c8ef4ed8e22111f65a8a04f68ef406f1c85fff9e091681e46c0312"
+    },
+    {
+      "source": "res/drawable-xxhdpi/card_light_snow.webp",
+      "destination": "assets/oxygen_widget/icons/card_light_snow.webp",
+      "bytes": 612,
+      "sha256": "70250f055f29a8d46c21c9195e2f2375553d84682253d1ee320a4ef0be8bdbef"
+    },
+    {
+      "source": "res/drawable-xxhdpi/card_middle_snow.webp",
+      "destination": "assets/oxygen_widget/icons/card_middle_snow.webp",
+      "bytes": 702,
+      "sha256": "6838e8de48538e5c907a6ebd692425568e16bb5b055bfb2e6f6df69a89e42459"
+    },
+    {
+      "source": "res/drawable-xxhdpi/card_sand_dust.webp",
+      "destination": "assets/oxygen_widget/icons/card_sand_dust.webp",
+      "bytes": 644,
+      "sha256": "8dd64f14ee10f3402662a7ae2b6a588c7fad77e1eeca8b282a09fe0996b8b9ed"
+    },
+    {
+      "source": "res/drawable-xxhdpi/card_blowing_dust.webp",
+      "destination": "assets/oxygen_widget/icons/card_blowing_dust.webp",
+      "bytes": 510,
+      "sha256": "8a034b9471d0bec4b9e467ce2ac21b0d2fa8800f8e0610ba6a210097fc874717"
+    },
+    {
+      "source": "res/drawable-xxhdpi/card_hail.webp",
+      "destination": "assets/oxygen_widget/icons/card_hail.webp",
+      "bytes": 558,
+      "sha256": "aeb4d66fe7beea3da561d82b7aee3fd0efb7637ce3bcf32787a49b388cefee99"
+    },
+    {
+      "source": "res/drawable-xxhdpi/card_smog.webp",
+      "destination": "assets/oxygen_widget/icons/card_smog.webp",
+      "bytes": 674,
+      "sha256": "b30b3233338d4b482a8feb571c1ed11e7ada76eedcc3b083efaa57241957eb0a"
+    },
+    {
+      "source": "res/drawable-xxhdpi/card_freezing_rain.webp",
+      "destination": "assets/oxygen_widget/icons/card_freezing_rain.webp",
+      "bytes": 560,
+      "sha256": "bf6ad11a31ca2db2efa969c15cd06d4b2b739bb6210c6b3a431d8c57e30b2640"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_sunny_daytime_2x2.webp",
+      "destination": "assets/oxygen_widget/oos_backgrounds/weather_quick_card_sunny_daytime_2x2.webp",
+      "bytes": 1494,
+      "sha256": "cc9e77b8a8a21892c5309406113bee55120a91768e2da82f197ec384969d3115"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_sunny_evening_2x2.webp",
+      "destination": "assets/oxygen_widget/oos_backgrounds/weather_quick_card_sunny_evening_2x2.webp",
+      "bytes": 3848,
+      "sha256": "b8bef0f3d3f8bdd50ceea97b7ab802abbb9715770d3bf59cd5babc66bc53de1a"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_sunny_night_2x2.webp",
+      "destination": "assets/oxygen_widget/oos_backgrounds/weather_quick_card_sunny_night_2x2.webp",
+      "bytes": 1194,
+      "sha256": "551e793eff68edd3d3c739f23bcf6010edc916fb6acd335874339a3f80b2f8cf"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_sunny_dark_daytime_2x2.webp",
+      "destination": "assets/oxygen_widget/oos_backgrounds/weather_quick_card_sunny_dark_daytime_2x2.webp",
+      "bytes": 986,
+      "sha256": "2ece38a4b9ebef4c46690334c7b603c22af0c4b989c23662c7647139e3f11a49"
+    },
+    {
+      "source": "res/drawable-xxxhdpi/weather_quick_card_sunny_dark_evening_2x2.webp",
+      "destination": "assets/oxygen_widget/oos_backgrounds/weather_quick_card_sunny_dark_evening_2x2.webp",
+      "bytes": 930,
+      "sha256": "fda05132de99fe7c465f3bfa00d8df1da74398527f87b4922c8355cc16b98595"
+    },
+    {
+      "source": "res/drawable/weather_quick_card_degree_dark.xml",
+      "destination": "res/drawable/weather_oxygen_oos_degree_dark.xml",
+      "bytes": 1127,
+      "sha256": "c7c1bce99dfb0fc05711b5ab8e3c0281c005a7eaaf3bacdca7c46c2e5bd6e0b6"
+    },
+    {
+      "source": "res/drawable/weather_quick_card_degree_light.xml",
+      "destination": "res/drawable/weather_oxygen_oos_degree_light.xml",
+      "bytes": 1127,
+      "sha256": "d279859efdf57fe74443db40aa96064dbb82dfd6ad0d125f91ceadb0f6a35f8b"
+    },
+    {
+      "source": "res/drawable/weather_quick_card_icon_arrow_dark_up.xml",
+      "destination": "res/drawable/weather_oxygen_oos_icon_arrow_dark_up.xml",
+      "bytes": 618,
+      "sha256": "08e30fdbcaa105791ab783349eabe2b136bf58021ba5a91060a1a1bc3c31b2b4"
+    },
+    {
+      "source": "res/drawable/weather_quick_card_icon_arrow_light_up.xml",
+      "destination": "res/drawable/weather_oxygen_oos_icon_arrow_light_up.xml",
+      "bytes": 618,
+      "sha256": "93369fa184a40d85cf89ff78db222a5b98430457f5146f40536867ab7f312b13"
+    }
+  ]
+}

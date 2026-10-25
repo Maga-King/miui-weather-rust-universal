@@ -6,7 +6,6 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.database.Cursor;
-import android.database.sqlite.SQLiteDatabase;
 import android.util.Log;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -79,8 +78,7 @@ public final class WeatherAlerts {
                 String raw=state(c).getString("snapshot",null);if(raw!=null)response=new JSONObject(raw);
             }
             if(response==null && c.getDatabasePath("weather.db").isFile()) {
-                try(SQLiteDatabase db=SQLiteDatabase.openDatabase(c.getDatabasePath("weather.db").getAbsolutePath(),null,
-                        SQLiteDatabase.OPEN_READONLY|SQLiteDatabase.NO_LOCALIZED_COLLATORS);
+                try(WeatherReadDatabase db=WeatherReadDatabase.open(c);
                     Cursor row=db.rawQuery("SELECT data1 FROM raw WHERE city_id=? LIMIT 1",new String[]{city.id})) {
                     if(row.moveToFirst()&&!row.isNull(0))response=new JSONObject(row.getString(0));
                 }

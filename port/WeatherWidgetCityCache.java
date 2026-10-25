@@ -46,8 +46,12 @@ public final class WeatherWidgetCityCache {
         } catch(Exception error){return null;}
     }
     public static JSONObject raw(Context context,String cityId) {
+        try{return raw(context,WeatherDatabaseBridge.cityById(context,cityId));}
+        catch(Exception error){return null;}
+    }
+    static JSONObject raw(Context context,WeatherDatabaseBridge.City city) {
         try {
-            JSONObject data=entry(context,WeatherDatabaseBridge.cityById(context,cityId));
+            JSONObject data=entry(context,city);
             return data==null?null:data.getJSONObject("raw");
         } catch(Exception error){return null;}
     }
@@ -86,10 +90,7 @@ public final class WeatherWidgetCityCache {
         for(WeatherDatabaseBridge.City city:selected)if(city.located){located=city.id;break;}
         Set<String> wanted=new LinkedHashSet<>();
         AppWidgetManager manager=AppWidgetManager.getInstance(context);
-        Class<?>[] providers={WeatherWidgetProvider.class,WeatherDualCityWidgetProvider.class,
-                WeatherHourlyWidgetProvider.class,WeatherSmallWidgetProvider.class,WeatherCustomWidgetProvider.class,
-                WeatherDailyWidgetProvider.class,WeatherCompleteWidgetProvider.class,WeatherSunWidgetProvider.class};
-        for(Class<?> provider:providers)for(int id:manager.getAppWidgetIds(new ComponentName(context,provider))) {
+        for(Class<?> provider:WeatherWidgetCatalog.PROVIDERS)for(int id:manager.getAppWidgetIds(new ComponentName(context,provider))) {
             boolean dual=provider==WeatherDualCityWidgetProvider.class;
             String city=WeatherWidgetPreferences.cityId(context,id);
             wanted.add(city.isEmpty()?(dual?located:first):city);

@@ -316,9 +316,7 @@ final class WeatherCardWidgetRenderer {
     private String format(long time,String pattern) {SimpleDateFormat f=new SimpleDateFormat(pattern,Locale.getDefault());f.setTimeZone(zone());return f.format(time);}
     private static String clock(int minute) {return String.format(Locale.getDefault(),"%02d:%02d",minute/60,minute%60);}
     private static boolean night(WeatherWidgetData d,long time) {
-        if(d==null||d.sunriseMinute<0||d.sunsetMinute<0)return false;
-        Calendar c=Calendar.getInstance(d.zoneId.isEmpty()?TimeZone.getDefault():TimeZone.getTimeZone(d.zoneId));c.setTimeInMillis(time);
-        int minute=c.get(Calendar.HOUR_OF_DAY)*60+c.get(Calendar.MINUTE);return minute<d.sunriseMinute||minute>=d.sunsetMinute;
+        return WeatherWidgetDayNight.night(d,time);
     }
     private static JSONObject at(JSONArray array,int index) {return array==null?null:array.optJSONObject(index);}
     private static String number(JSONObject o,String key) {String s=o.optString(key,"");return s.matches("-?\\d{1,3}(?:\\.\\d)?")?s:"--";}

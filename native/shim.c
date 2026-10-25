@@ -1,5 +1,6 @@
 #include <android/log.h>
 #include <stdlib.h>
+#include <time.h>
 #include "xdl.h"
 static int resolved_count;
 int weather_shim_resolved_count(void) { return resolved_count; }
@@ -132,69 +133,65 @@ void *weather_vtable_62[8] __asm__("_ZTVN7android3gui14CallAnimParamsE") = {0,0,
 __attribute__((noreturn)) static void weather_guard_63(void) { __android_log_assert("unsupported native API", "WeatherPortProbe", "UNIMPLEMENTED: _ZTVN8SkBitmap13HeapAllocatorE"); abort(); }
 void *weather_vtable_63[8] __asm__("_ZTVN8SkBitmap13HeapAllocatorE") = {0,0,weather_guard_63,weather_guard_63,weather_guard_63,weather_guard_63,weather_guard_63,weather_guard_63};
 __attribute__((constructor)) static void initialize_bridge(void) {
+    // Keep xDL symbol/debug-data tables for all 33 HWUI lookups.
+    struct timespec begin, end;
+    clock_gettime(CLOCK_MONOTONIC, &begin);
+    void *hwui = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZN31RecyclingClippingPixelAllocator15copyIfNecessaryEv", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZN31RecyclingClippingPixelAllocator15copyIfNecessaryEv", 0);
     if (address) { weather_slot_0 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZN31RecyclingClippingPixelAllocator15copyIfNecessaryEv");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZN31RecyclingClippingPixelAllocatorC1EPN7android6BitmapEbNSt3__18optionalI6SkRectEE", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZN31RecyclingClippingPixelAllocatorC1EPN7android6BitmapEbNSt3__18optionalI6SkRectEE", 0);
     if (address) { weather_slot_1 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZN31RecyclingClippingPixelAllocatorC1EPN7android6BitmapEbNSt3__18optionalI6SkRectEE");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZN7android10uirenderer22HardwareBitmapUploader14hasFP16SupportEv", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZN7android10uirenderer22HardwareBitmapUploader14hasFP16SupportEv", 0);
     if (address) { weather_slot_3 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZN7android10uirenderer22HardwareBitmapUploader14hasFP16SupportEv");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZN7android10uirenderer7Gainmap23allocateHardwareGainmapERKNS_2spIS1_EE", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZN7android10uirenderer7Gainmap23allocateHardwareGainmapERKNS_2spIS1_EE", 0);
     if (address) { weather_slot_5 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZN7android10uirenderer7Gainmap23allocateHardwareGainmapERKNS_2spIS1_EE");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZN7android12MinikinUtils9getBoundsEPKNS_5PaintEN7minikin4BidiEPKNS_8TypefaceEPKtmPNS4_11MinikinRectE", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZN7android12MinikinUtils9getBoundsEPKNS_5PaintEN7minikin4BidiEPKNS_8TypefaceEPKtmPNS4_11MinikinRectE", 0);
     if (address) { weather_slot_6 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZN7android12MinikinUtils9getBoundsEPKNS_5PaintEN7minikin4BidiEPKNS_8TypefaceEPKtmPNS4_11MinikinRectE");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZN7android12MinikinUtils19prepareMinikinPaintEPKNS_5PaintEPKNS_8TypefaceE", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZN7android12MinikinUtils19prepareMinikinPaintEPKNS_5PaintEPKNS_8TypefaceE", 0);
     if (address) { weather_slot_8 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZN7android12MinikinUtils19prepareMinikinPaintEPKNS_5PaintEPKNS_8TypefaceE");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZN7android15MinikinFontSkia14populateSkFontEP6SkFontPKN7minikin11MinikinFontENS3_10FontFakeryE", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZN7android15MinikinFontSkia14populateSkFontEP6SkFontPKN7minikin11MinikinFontENS3_10FontFakeryE", 0);
     if (address) { weather_slot_12 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZN7android15MinikinFontSkia14populateSkFontEP6SkFontPKN7minikin11MinikinFontENS3_10FontFakeryE");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZN7android15MinikinFontSkiaC1E5sk_spI10SkTypefaceEiPKvmNSt3__117basic_string_viewIcNS6_11char_traitsIcEEEEiRKN7minikin18SortedPackedVectorINSB_13FontVariationELm2EtEE", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZN7android15MinikinFontSkiaC1E5sk_spI10SkTypefaceEiPKvmNSt3__117basic_string_viewIcNS6_11char_traitsIcEEEEiRKN7minikin18SortedPackedVectorINSB_13FontVariationELm2EtEE", 0);
     if (address) { weather_slot_13 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZN7android15MinikinFontSkiaC1E5sk_spI10SkTypefaceEiPKvmNSt3__117basic_string_viewIcNS6_11char_traitsIcEEEEiRKN7minikin18SortedPackedVectorINSB_13FontVariationELm2EtEE");
-    if (library) xdl_close(library);
     }
     {
     void *library = xdl_open("libinput.so", XDL_TRY_FORCE_LOAD);
@@ -205,204 +202,183 @@ __attribute__((constructor)) static void initialize_bridge(void) {
     if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZN7android5Paint12setJavaFlagsEj", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZN7android5Paint12setJavaFlagsEj", 0);
     if (address) { weather_slot_29 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZN7android5Paint12setJavaFlagsEj");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZN7android5PaintC1ERKS0_", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZN7android5PaintC1ERKS0_", 0);
     if (address) { weather_slot_30 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZN7android5PaintC1ERKS0_");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZN7android5PaintC1Ev", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZN7android5PaintC1Ev", 0);
     if (address) { weather_slot_31 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZN7android5PaintC1Ev");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZN7android5PaintD1Ev", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZN7android5PaintD1Ev", 0);
     if (address) { weather_slot_32 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZN7android5PaintD1Ev");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZN7android6Bitmap8compressENS0_18JavaCompressFormatEiP9SkWStream", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZN7android6Bitmap8compressENS0_18JavaCompressFormatEiP9SkWStream", 0);
     if (address) { weather_slot_33 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZN7android6Bitmap8compressENS0_18JavaCompressFormatEiP9SkWStream");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZN7android6Bitmap10setGainmapEONS_2spINS_10uirenderer7GainmapEEE", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZN7android6Bitmap10setGainmapEONS_2spINS_10uirenderer7GainmapEEE", 0);
     if (address) { weather_slot_35 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZN7android6Bitmap10setGainmapEONS_2spINS_10uirenderer7GainmapEEE");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZN7android6Bitmap11getSkBitmapEP8SkBitmap", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZN7android6Bitmap11getSkBitmapEP8SkBitmap", 0);
     if (address) { weather_slot_36 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZN7android6Bitmap11getSkBitmapEP8SkBitmap");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZN7android6Bitmap11reconfigureERK11SkImageInfom", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZN7android6Bitmap11reconfigureERK11SkImageInfom", 0);
     if (address) { weather_slot_37 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZN7android6Bitmap11reconfigureERK11SkImageInfom");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZN7android6Bitmap12setAlphaTypeE11SkAlphaType", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZN7android6Bitmap12setAlphaTypeE11SkAlphaType", 0);
     if (address) { weather_slot_38 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZN7android6Bitmap12setAlphaTypeE11SkAlphaType");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZN7android6Bitmap13setColorSpaceE5sk_spI12SkColorSpaceE", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZN7android6Bitmap13setColorSpaceE5sk_spI12SkColorSpaceE", 0);
     if (address) { weather_slot_39 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZN7android6Bitmap13setColorSpaceE5sk_spI12SkColorSpaceE");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZN7android6Bitmap18allocateHeapBitmapEP8SkBitmap", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZN7android6Bitmap18allocateHeapBitmapEP8SkBitmap", 0);
     if (address) { weather_slot_40 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZN7android6Bitmap18allocateHeapBitmapEP8SkBitmap");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZN7android6Bitmap18allocateHeapBitmapEmRK11SkImageInfom", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZN7android6Bitmap18allocateHeapBitmapEmRK11SkImageInfom", 0);
     if (address) { weather_slot_41 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZN7android6Bitmap18allocateHeapBitmapEmRK11SkImageInfom");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZN7android6Bitmap20setHasHardwareMipMapEb", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZN7android6Bitmap20setHasHardwareMipMapEb", 0);
     if (address) { weather_slot_42 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZN7android6Bitmap20setHasHardwareMipMapEb");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZN7android6Bitmap21computeAllocationSizeEmiPm", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZN7android6Bitmap21computeAllocationSizeEmiPm", 0);
     if (address) { weather_slot_43 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZN7android6Bitmap21computeAllocationSizeEmiPm");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZN7android6Bitmap22allocateHardwareBitmapERK8SkBitmap", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZN7android6Bitmap22allocateHardwareBitmapERK8SkBitmap", 0);
     if (address) { weather_slot_44 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZN7android6Bitmap22allocateHardwareBitmapERK8SkBitmap");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZN7android6Canvas13create_canvasERK8SkBitmap", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZN7android6Canvas13create_canvasERK8SkBitmap", 0);
     if (address) { weather_slot_46 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZN7android6Canvas13create_canvasERK8SkBitmap");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZN7android6Canvas14drawTextOnPathEPKtiN7minikin4BidiERK6SkPathffRKNS_5PaintEPKNS_8TypefaceE", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZN7android6Canvas14drawTextOnPathEPKtiN7minikin4BidiERK6SkPathffRKNS_5PaintEPKNS_8TypefaceE", 0);
     if (address) { weather_slot_47 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZN7android6Canvas14drawTextOnPathEPKtiN7minikin4BidiERK6SkPathffRKNS_5PaintEPKNS_8TypefaceE");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZN7android6Canvas8drawTextEPKtiiiiiffN7minikin4BidiERKNS_5PaintEPKNS_8TypefaceEPNS3_12MeasuredTextE", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZN7android6Canvas8drawTextEPKtiiiiiffN7minikin4BidiERKNS_5PaintEPKNS_8TypefaceEPNS3_12MeasuredTextE", 0);
     if (address) { weather_slot_48 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZN7android6Canvas8drawTextEPKtiiiiiffN7minikin4BidiERKNS_5PaintEPKNS_8TypefaceEPNS3_12MeasuredTextE");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZN7android8Typeface18createFromFamiliesEONSt3__16vectorINS1_10shared_ptrIN7minikin10FontFamilyEEENS1_9allocatorIS6_EEEEiiPKS0_", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZN7android8Typeface18createFromFamiliesEONSt3__16vectorINS1_10shared_ptrIN7minikin10FontFamilyEEENS1_9allocatorIS6_EEEEiiPKS0_", 0);
     if (address) { weather_slot_51 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZN7android8Typeface18createFromFamiliesEONSt3__16vectorINS1_10shared_ptrIN7minikin10FontFamilyEEENS1_9allocatorIS6_EEEEiiPKS0_");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZN7android8Typeface31createFromTypefaceWithVariationEPS0_RKN7minikin18SortedPackedVectorINS2_13FontVariationELm2EtEE", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZN7android8Typeface31createFromTypefaceWithVariationEPS0_RKN7minikin18SortedPackedVectorINS2_13FontVariationELm2EtEE", 0);
     if (address) { weather_slot_52 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZN7android8Typeface31createFromTypefaceWithVariationEPS0_RKN7minikin18SortedPackedVectorINS2_13FontVariationELm2EtEE");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZNK7android5Paint12getJavaFlagsEv", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZNK7android5Paint12getJavaFlagsEv", 0);
     if (address) { weather_slot_57 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZNK7android5Paint12getJavaFlagsEv");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZNK7android6Bitmap7gainmapEv", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZNK7android6Bitmap7gainmapEv", 0);
     if (address) { weather_slot_58 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZNK7android6Bitmap7gainmapEv");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZNK7android6Bitmap11getAshmemFdEv", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZNK7android6Bitmap11getAshmemFdEv", 0);
     if (address) { weather_slot_59 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZNK7android6Bitmap11getAshmemFdEv");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZNK7android6Bitmap17hasHardwareMipMapEv", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZNK7android6Bitmap17hasHardwareMipMapEv", 0);
     if (address) { weather_slot_60 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZNK7android6Bitmap17hasHardwareMipMapEv");
-    if (library) xdl_close(library);
     }
     {
-    void *library = xdl_open("libhwui.so", XDL_TRY_FORCE_LOAD);
+    void *library = hwui;
     void *address = library ? xdl_sym(library, "_ZNK7android6Bitmap22getAllocationByteCountEv", 0) : 0;
     if (!address && library) address = xdl_dsym(library, "_ZNK7android6Bitmap22getAllocationByteCountEv", 0);
     if (address) { weather_slot_61 = address; resolved_count++; }
     else __android_log_print(ANDROID_LOG_ERROR, "WeatherPortProbe", "Could not resolve: _ZNK7android6Bitmap22getAllocationByteCountEv");
-    if (library) xdl_close(library);
     }
     __android_log_print(ANDROID_LOG_INFO, "WeatherPortProbe", "Compatibility candidates resolved: %d; remaining APIs have diagnostic traps", resolved_count);
+    if (hwui) xdl_close(hwui);
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    long elapsed_ms = (end.tv_sec-begin.tv_sec)*1000+(end.tv_nsec-begin.tv_nsec)/1000000;
+    __android_log_print(ANDROID_LOG_INFO, "WeatherStartup", "hwui-symbols elapsed=%ldms resolved=%d", elapsed_ms, resolved_count);
 }

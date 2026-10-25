@@ -15,14 +15,21 @@ import java.util.*;
 
 public class WeatherActivity extends Activity implements SurfaceHolder.Callback {
     private static boolean diagnosticsOpened;
+    // The native engine survives Activity recreation, but not process death.
+    private static boolean retainedPageReady;
     private final Handler main = new Handler(Looper.getMainLooper());
     private SurfaceView surface;
     private TextView status;
     private int attachedDensityDpi;
     private boolean densityRecreationPending;
     private boolean foregroundResumed;
+    private long startupStartedAt;
+    private long startupLastMark;
     private final Runnable densityRefresh=this::refreshDisplayDensity;
     private AndroidStartupSplash startupSplash;
+    private final WeatherStartupGate startupGate=new WeatherStartupGate();
+    private boolean startupHasCachedWeather=true;
+    private final Runnable startupWatchdog=()->revealStartup("readiness-timeout",false);
     private boolean started;
     private AndroidTextInput textInput;
     private AndroidPermissions permissions;
@@ -34,7 +41,10 @@ public class WeatherActivity extends Activity implements SurfaceHolder.Callback 
     private MajesticSurface majestic;
     private AndroidPlatformServices platformServices;
     private AndroidWeatherPages weatherPages;
+    private AndroidIntentBridge intentBridge;
+    private AndroidUiServices uiServices;
     private AndroidWeatherNotifications notifications;
+    private AndroidWeatherSpeech speech;
     private AndroidMiPushBridge push;
     private AndroidMiPushBridge.Sender pushSender;
     private boolean networkConsent;
@@ -56,14 +66,26 @@ public class WeatherActivity extends Activity implements SurfaceHolder.Callback 
     private native void nativeInsets(int left,int top,int right,int bottom,int imeBottom,int gestureLeft,int gestureTop,int gestureRight,int gestureBottom,double touchSlop);
     private native void nativeDetach();
     private native void nativeAttach();
+    private static native boolean nativeHasStartupObserver();
+    private synchronized void startupMark(String phase){
+        long now=android.os.SystemClock.elapsedRealtime();
+        long total=now-startupStartedAt,delta=now-startupLastMark;
+        startupLastMark=now;
+        Log.i("WeatherStartup",phase+" total="+total+"ms delta="+delta+"ms");
+    }
     @Override protected void attachBaseContext(android.content.Context base){
         android.content.Context wrapped=WeatherDisplayDensity.wrap(base);
         super.attachBaseContext(wrapped);
         attachedDensityDpi=wrapped.getResources().getDisplayMetrics().densityDpi;
     }
     @Override public void onCreate(Bundle state){
+        startupStartedAt=startupLastMark=android.os.SystemClock.elapsedRealtime();
+        startupMark("onCreate");
         startupSplash=AndroidStartupSplash.install(this,this::configureSystemBars);
         super.onCreate(state);
+        if(retainedPageReady)startupGate.content();
+        // Failure escape only, never a minimum splash duration.
+        main.postDelayed(startupWatchdog,5000);
         if(state!=null){
             currentRoute=state.getString("weather_current_route");
             frameworkHandlesBack=state.getBoolean("weather_framework_back",false);
@@ -77,27 +99,42 @@ public class WeatherActivity extends Activity implements SurfaceHolder.Callback 
         permissions=new AndroidPermissions(this,this::sendMethod);
         preferences=new AndroidPreferences(this);
         consent=new AndroidConsent(this,this::sendMethod);
-        location=new AndroidLocation(this);
+        location=new AndroidLocation(this,permissions);
         pigeonPreferences=new AndroidPigeonPreferences(this);
         pigeonPaths=new AndroidPigeonPathProvider(this);
         platformServices=new AndroidPlatformServices(this,(channel,bytes)->nativeSend(channel,bytes));
         weatherPages=new AndroidWeatherPages(this);
+        intentBridge=new AndroidIntentBridge(this,this::sendMethod,state);
+        uiServices=new AndroidUiServices(this);
         notifications=new AndroidWeatherNotifications(this);
+        speech=new AndroidWeatherSpeech(this,(channel,bytes)->{if(started&&!destroyed)nativeSend(channel,bytes);});
         push=new AndroidMiPushBridge(this);
         pushSender=(name,bytes)->{if(started&&!destroyed)nativeSend(name,bytes);};
         AndroidMiPushBridge.attach(pushSender);
         networkConsent=WeatherRefresh.networkAllowed(this);
+        if(!retainedPageReady)cacheWorker.execute(()->{
+            boolean cached=WeatherDatabaseBridge.hasCachedWeather(getApplicationContext());
+            main.post(()->{
+                if(destroyed)return;
+                startupHasCachedWeather=cached;
+                if(!cached){startupGate.ordinaryPage();maybeRevealStartup();}
+            });
+        });
+        startupMark("bridges-ready");
         if(Build.VERSION.SDK_INT>=33)backCallback=this::dispatchBack;
         updateBackCallback();
         surface=new SurfaceView(this){
             @Override public boolean onCheckIsTextEditor(){return textInput.client>=0;}
             @Override public android.view.inputmethod.InputConnection onCreateInputConnection(android.view.inputmethod.EditorInfo info){return textInput.connection(info);}
+            @Override public boolean onKeyDown(int code,KeyEvent event){return textInput.handleKeyEvent(event)||super.onKeyDown(code,event);}
+            @Override public boolean onKeyUp(int code,KeyEvent event){return textInput.handleKeyEvent(event)||super.onKeyUp(code,event);}
             @Override public boolean onTouchEvent(MotionEvent event){return forwardTouch(event);}
         };
         surface.setFocusable(true);surface.setFocusableInTouchMode(true);textInput.view=surface;root.addView(surface);
         status=new TextView(this);status.setPadding(20,80,20,20);status.setVisibility(View.GONE);root.addView(status);
         setContentView(root);surface.getHolder().addCallback(this);
         root.setOnApplyWindowInsetsListener((view,insets)->{lastInsets=insets;applyInsets();return insets;});
+        startupMark("surface-ready");
         try{
             WeatherFonts.configureEngine(this);
             System.loadLibrary("weatherhost");
@@ -106,21 +143,30 @@ public class WeatherActivity extends Activity implements SurfaceHolder.Callback 
             long installed=getPackageManager().getPackageInfo(getPackageName(),0).lastUpdateTime;
             SharedPreferences extraction=getSharedPreferences("runtime_extraction",MODE_PRIVATE);
             boolean extracted=extraction.getLong("installed",-1)==installed;
-            for(String name:getAssets().list("runtime")){
-                File file=new File(extra,name);if(file.exists())file.setWritable(true);
-                if(extracted&&file.isFile()){file.setReadOnly();continue;}
-                try(InputStream in=getAssets().open("runtime/"+name);FileOutputStream out=new FileOutputStream(file)){
-                    byte[] b=new byte[32768];int n;while((n=in.read(b))>=0)out.write(b,0,n);
-                }file.setReadOnly();
+            boolean runtimeComplete=extracted;
+            String[] runtimeNames=getAssets().list("runtime");
+            if(runtimeComplete){
+                for(String name:runtimeNames)if(!new File(extra,name).isFile()){runtimeComplete=false;break;}
             }
-            extraction.edit().putLong("installed",installed).commit();
+            if(!runtimeComplete){
+                for(String name:runtimeNames){
+                    File file=new File(extra,name);
+                    if(file.exists())file.setWritable(true);
+                    try(InputStream in=getAssets().open("runtime/"+name);FileOutputStream out=new FileOutputStream(file)){
+                        byte[] b=new byte[32768];int n;while((n=in.read(b))>=0)out.write(b,0,n);
+                    }file.setReadOnly();
+                }
+                extraction.edit().putLong("installed",installed).commit();
+            }
+            startupMark("runtime-ready");
             String error=startEngine(getApplicationInfo().nativeLibraryDir,extra.getAbsolutePath(),getFilesDir().getAbsolutePath(),getAssets(),getIntent().getStringExtra("render_backend"));
+            startupMark("engine-returned");
             started=error==null;
-            if(error!=null){status.setText(error);status.setVisibility(View.VISIBLE);startupSplash.onFirstFrame();}else{
+            if(error!=null){status.setText(error);status.setVisibility(View.VISIBLE);revealStartup("engine-error",false);}else{
                 sendSystemSettings();
                 send("flutter/localization","{\"method\":\"setLocale\",\"args\":[\"zh\",\"CN\",\"\",\"\"]}");
             }
-        }catch(Throwable error){status.setText("天气启动失败，请重新打开。");status.setVisibility(View.VISIBLE);startupSplash.onFirstFrame();Log.e("WeatherHost","startup",error);}
+        }catch(Throwable error){status.setText("天气启动失败，请重新打开。");status.setVisibility(View.VISIBLE);revealStartup("engine-error",false);Log.e("WeatherHost","startup",error);}
     }
     void send(String channel,String text){nativeSend(channel,text.getBytes(StandardCharsets.UTF_8));}
     private void configureSystemBars(){
@@ -180,7 +226,42 @@ public class WeatherActivity extends Activity implements SurfaceHolder.Callback 
         try{send(channel,new JSONObject().put("method",method).put("args",args==null?JSONObject.NULL:JSONObject.wrap(args)).toString());}
         catch(JSONException error){Log.e("WeatherChannel","Cannot encode platform event",error);}
     }
-    public void onFirstFrame(){main.post(()->{if(!destroyed){status.setVisibility(View.GONE);startupSplash.onFirstFrame();}});}
+    public void onFirstFrame(){
+        startupMark("first-frame-callback");
+        main.post(()->{if(!destroyed){startupGate.frame();maybeRevealStartup();}});
+    }
+    private void startupContentReady(String reason){
+        if(destroyed||startupGate.isClosed())return;
+        startupMark(reason);startupGate.content();maybeRevealStartup();
+    }
+    void onWeatherSceneRequested(){
+        if(!retainedPageReady&&!startupGate.isClosed()&&nativeHasStartupObserver()
+                &&networkConsent&&startupHasCachedWeather
+                &&(currentRoute==null||"/".equals(currentRoute)||"/home".equals(currentRoute)))
+            startupGate.expectWeather();
+    }
+    public void onWeatherFrameReady(){
+        main.post(()->{if(!destroyed){startupGate.weatherFrame();startupContentReady("weather-content-drawn");}});
+    }
+    private void maybeRevealStartup(){
+        if(!startupGate.scheduleReveal())return;
+        // Let the page-ready message's pending layout/raster reach the display.
+        // This follows display frames, not a fixed sleep or an entrance animation.
+        Runnable reveal=()->surface.postOnAnimation(()->surface.postOnAnimation(()->{
+            if(startupGate.ready())revealStartup("content-revealed",true);
+            else startupGate.retry();
+        }));
+        if(majestic!=null)majestic.prepareStartupBackdrop(reveal);else reveal.run();
+    }
+    private void revealStartup(String reason,boolean ready){
+        if(destroyed||startupGate.isClosed())return;
+        startupGate.close();main.removeCallbacks(startupWatchdog);
+        if(majestic!=null)majestic.finishStartup();
+        if(ready){status.setVisibility(View.GONE);retainedPageReady=true;}
+        startupSplash.onFirstFrame();startupMark(reason);
+        if(ready)reportFullyDrawn();
+        else if("readiness-timeout".equals(reason))Log.w("WeatherStartup","Page readiness was not signalled; exposing the current page");
+    }
     public void onPlatformMessage(String channel,byte[] data,long id){main.post(()->{if(!destroyed)handle(channel,data,id);else if(id!=0)nativeReply(id,null);});}
     private void handle(String channel,byte[] data,long id){
         if(channel.equals("flutter/isolate")){Log.i("WeatherChannel","Dart isolate is running");return;}
@@ -211,12 +292,23 @@ public class WeatherActivity extends Activity implements SurfaceHolder.Callback 
                 public void success(Object result){replyResult(channel,json,id,result);}
                 public void error(String code,String message){replyError(json,id,code,message);}
             }))return;
+            if(speech.handle(channel,method,args,json,new AndroidWeatherSpeech.Result(){
+                public void success(Object result){replyResult(channel,json,id,result);}
+                public void error(String code,String message){replyError(json,id,code,message);}
+            }))return;
             Object result=handleCall(channel,method,args);
             if(result==UNSUPPORTED){Log.w("WeatherChannel","UNIMPLEMENTED "+channel+" :: "+method);if(channelLog!=null)channelLog.println("UNIMPLEMENTED "+channel+" :: "+method);nativeReply(id,null);return;}
             replyResult(channel,json,id,result);
             scheduleDensityRefresh();
         }catch(AndroidWeatherNotifications.NotificationException error){replyError(json,id,error.code,error.getMessage());}
-        catch(Throwable error){Log.e("WeatherChannel",channel+" :: "+method,error);if(channelLog!=null)error.printStackTrace(channelLog);nativeReply(id,null);}
+        catch(AndroidWeatherPages.PageException error){replyError(json,id,error.code,error.getMessage());}
+        catch(Throwable error){
+            Log.e("WeatherChannel",channel+" :: "+method,error);if(channelLog!=null)error.printStackTrace(channelLog);
+            // Null transport means "method missing" to Flutter, even when a real
+            // handler failed. Preserve the basic-message channel's separate codec.
+            if(channel.equals("weather_channel"))nativeReply(id,null);
+            else replyError(json,id,"platform_error",method+": "+error.getClass().getSimpleName()+": "+error.getMessage());
+        }
     }
     private void replyResult(String channel,boolean json,long id,Object result){
         if(id==0)return;
@@ -246,7 +338,11 @@ public class WeatherActivity extends Activity implements SurfaceHolder.Callback 
         Object preferenceResult=preferences.handleCall(channel,method,args);
         if(preferenceResult!=AndroidPreferences.UNHANDLED)return preferenceResult;
         Object consentResult=consent.handleCall(channel,method,args);
-        if(consentResult!=AndroidConsent.UNHANDLED)return consentResult;
+        if(consentResult!=AndroidConsent.UNHANDLED){startupGate.ordinaryPage();startupContentReady("consent-ui-ready");return consentResult;}
+        Object intentResult=intentBridge.handleCall(channel,method,args);
+        if(intentResult!=AndroidIntentBridge.UNHANDLED)return intentResult;
+        Object uiResult=uiServices.handleCall(channel,method,args);
+        if(uiResult!=AndroidUiServices.UNHANDLED)return uiResult;
         if(channel.equals("flutter/textinput"))return textInput.handle(method,args);
         if(channel.equals("flutter/keyboard"))return Collections.emptyMap();
         if(channel.equals("flutter/processtext")&&method.equals("ProcessText.queryTextActions"))return Collections.emptyMap();
@@ -254,6 +350,8 @@ public class WeatherActivity extends Activity implements SurfaceHolder.Callback 
             if(method.equals("selectSingleEntryHistory"))return null;
             if(method.equals("routeInformationUpdated")){
                 currentRoute=args instanceof JSONObject?((JSONObject)args).optString("uri",""):null;
+                if(currentRoute!=null&&!currentRoute.isEmpty()&&!"/".equals(currentRoute)
+                        &&!"/home".equals(currentRoute)){startupGate.ordinaryPage();startupContentReady("non-home-route-ready");}
                 String route=getIntent().getStringExtra("open_route");
                 if(!requestedRouteOpened&&isAllowedLaunchRoute(route)){
                     requestedRouteOpened=true;main.post(()->sendMethod("flutter/navigation","pushRoute",route));
@@ -279,10 +377,6 @@ public class WeatherActivity extends Activity implements SurfaceHolder.Callback 
         }
         if(channel.equals("com.xiaomi.hyperos/native_ready")){
             main.post(()->send(channel,"{\"method\":\"onReady\",\"args\":null}"));return true;
-        }
-        if(channel.equals("com.android.package.manager.method.channel")){
-            Map<String,Object> info=new LinkedHashMap<>();info.put("versionName","18.0.0.27-R");info.put("versionCode",180000270);info.put("lastUpdateTime",getPackageManager().getPackageInfo(getPackageName(),0).lastUpdateTime);
-            info.put("applicationInfo",Collections.singletonMap("flags",getApplicationInfo().flags));return info;
         }
         if(channel.equals("com.android.os.system.properties.method.channel")){
             if(method.equals("getAll"))return Collections.emptyMap();
@@ -330,7 +424,14 @@ public class WeatherActivity extends Activity implements SurfaceHolder.Callback 
             }
             if(method.equals("update_cta_result")){networkConsent=Boolean.TRUE.equals(args);WeatherRefresh.setNetworkAllowed(this,networkConsent);maybeOpenCityPicker();return null;}
             // Optional analytics have no local observer or uploader in this ordinary APK.
-            if(method.startsWith("track_"))return null;
+            if(method.startsWith("track_")){
+                // Use only as a local readiness hint; never upload analytics or
+                // require tracking consent. Framework navigation is independent.
+                if(method.equals("track_page_event")
+                        &&Boolean.TRUE.equals(AndroidPlatformServices.value(args,"isPageIn")))
+                    startupContentReady("page-visible");
+                return null;
+            }
             if(method.equals("send_broadcast")&&args instanceof JSONObject){
                 if("com.miui.weather2.FROM_FOREGROUND_TO_WAKE_BACKGROUND".equals(((JSONObject)args).optString("action"))){
                     main.removeCallbacks(cacheSync);main.postDelayed(cacheSync,1000);
@@ -343,6 +444,32 @@ public class WeatherActivity extends Activity implements SurfaceHolder.Callback 
                 return info!=null&&info.isConnected();
             }
             if(method.equals("get_color_mode"))return getWindow().getColorMode();
+            if(method.equals("set_color_mode")){
+                int mode=AndroidPlatformServices.integer(AndroidPlatformServices.value(args,"color_mode"));
+                if(mode!=android.content.pm.ActivityInfo.COLOR_MODE_DEFAULT
+                        &&mode!=android.content.pm.ActivityInfo.COLOR_MODE_WIDE_COLOR_GAMUT)
+                    throw new IllegalArgumentException("Unsupported weather color mode");
+                getWindow().setColorMode(mode);return null;
+            }
+            if(method.equals("get_network_info_network_type")){
+                android.net.ConnectivityManager manager=getSystemService(android.net.ConnectivityManager.class);
+                android.net.NetworkInfo info=manager==null?null:manager.getActiveNetworkInfo();
+                return info==null?-1:info.getType();
+            }
+            if(method.equals("notify_change")){
+                List<?> uris=AndroidPlatformServices.list(args);
+                for(Object item:uris){
+                    android.net.Uri uri=android.net.Uri.parse(AndroidPlatformServices.requiredString(item));
+                    if(!"content".equals(uri.getScheme())||!"weather".equals(uri.getAuthority()))
+                        throw new IllegalArgumentException("Unexpected weather notification URI");
+                }
+                if(!uris.isEmpty()){
+                    // Coalesce a transaction's URI fan-out into one isolated DB read.
+                    // This imports saved data; it never marks a network fetch successful.
+                    main.removeCallbacks(cacheSync);main.postDelayed(cacheSync,250);
+                }
+                return null;
+            }
             if(method.equals("get_job_is_working"))return WeatherRefresh.originalJobScheduled(this,args);
             if(method.equals("requestScheduleTask"))return WeatherRefresh.requestFromOriginal(this,args);
             if(method.equals("get_network_country_iso")){
@@ -357,7 +484,13 @@ public class WeatherActivity extends Activity implements SurfaceHolder.Callback 
     }
     private Object platform(String method,Object args)throws Exception{
         if(method.equals("SystemNavigator.setFrameworkHandlesBack")){
-            frameworkHandlesBack=Boolean.TRUE.equals(args);updateBackCallback();return null;
+            frameworkHandlesBack=Boolean.TRUE.equals(args);updateBackCallback();
+            // The original router sends this when the initial route becomes
+            // active, after its weather/background initialization. Unlike page
+            // analytics this signal also exists when diagnostics are disabled.
+            if(currentRoute!=null&&!currentRoute.isEmpty()&&!"/".equals(currentRoute))
+                startupContentReady("framework-navigation-ready");
+            return null;
         }
         if(method.equals("SystemChrome.setSystemUIOverlayStyle")&&args instanceof JSONObject){
             configureSystemBars();
@@ -483,6 +616,7 @@ public class WeatherActivity extends Activity implements SurfaceHolder.Callback 
     @Override protected void onResume(){
         super.onResume();
         foregroundResumed=true;
+        if(speech!=null)speech.onResume();
         if(recreateForDensity())return;
         configureSystemBars();
         if(started){
@@ -517,12 +651,14 @@ public class WeatherActivity extends Activity implements SurfaceHolder.Callback 
         return "/searchCity".equals(route)||"/cityManagement".equals(route)||"/settings".equals(route);
     }
     @Override protected void onSaveInstanceState(Bundle state){
+        if(intentBridge!=null)intentBridge.saveState(state);
         state.putString("weather_current_route",currentRoute);
         state.putBoolean("weather_framework_back",frameworkHandlesBack);
         state.putBoolean("weather_launch_route_opened",requestedRouteOpened);
         super.onSaveInstanceState(state);
     }
     @Override protected void onStop(){
+        if(speech!=null)speech.onStop();
         main.removeCallbacks(cacheSync);
         if(!destroyed&&!isChangingConfigurations()&&WeatherWidgetProvider.hasWidgets(this))importSavedWeather(true);
         if(started)send("flutter/lifecycle","AppLifecycleState.paused");
@@ -531,14 +667,16 @@ public class WeatherActivity extends Activity implements SurfaceHolder.Callback 
     @Override protected void onActivityResult(int requestCode,int resultCode,android.content.Intent data){
         if(permissions!=null&&permissions.onActivityResult(requestCode,resultCode,data))return;
         if(consent!=null&&consent.onActivityResult(requestCode,resultCode,data))return;
+        if(intentBridge!=null&&intentBridge.onActivityResult(requestCode,resultCode,data))return;
         super.onActivityResult(requestCode,resultCode,data);
     }
     @Override public void onRequestPermissionsResult(int requestCode,String[] names,int[] grants){
         if(permissions==null||!permissions.onRequestPermissionsResult(requestCode,names,grants))super.onRequestPermissionsResult(requestCode,names,grants);
     }
     @Override protected void onDestroy(){
+        if(speech!=null)speech.onDestroy();
         AndroidMiPushBridge.detach(pushSender);
-        destroyed=true;main.removeCallbacks(cacheSync);main.removeCallbacks(densityRefresh);cacheWorker.shutdown();
+        destroyed=true;startupGate.close();main.removeCallbacks(startupWatchdog);main.removeCallbacks(cacheSync);main.removeCallbacks(densityRefresh);cacheWorker.shutdown();
         if(permissions!=null)permissions.onDestroy();if(consent!=null)consent.onDestroy();if(location!=null)location.onDestroy();
         if(platformServices!=null)platformServices.onDestroy();
         if(Build.VERSION.SDK_INT>=33&&backRegistered)getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(backCallback);

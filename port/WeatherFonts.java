@@ -82,6 +82,18 @@ public final class WeatherFonts {
     static boolean engineNeedsRestart(Context context){return engineMiSans!=null&&engineMiSans!=miSansEnabled(context);}
 
     static void apply(Context context,View root) {
+        android.os.Trace.beginSection("WeatherFonts.apply");
+        try{apply(context,root,new FontState(context));}
+        finally{android.os.Trace.endSection();}
+    }
+    private static final class FontState {
+        final boolean miSans,follow,bold;final int adjustment;final float scale;
+        FontState(Context context){
+            miSans=miSansEnabled(context);follow=followsSystemWeight(context);
+            bold=systemBold(context);adjustment=systemAdjustment(context);scale=weightScale(context);
+        }
+    }
+    private static void apply(Context context,View root,FontState state) {
         if(root instanceof TextView) {
             TextView text=(TextView)root;
             CharSequence value=text.getText();
@@ -91,22 +103,22 @@ public final class WeatherFonts {
             if(!symbol) {
                 Typeface old=text.getTypeface();
                 OriginalStyle original=originalStyles.get(text);
-                if(original==null){original=new OriginalStyle(old,systemAdjustment(context));originalStyles.put(text,original);}
-                int weight=systemBold(context)?Math.min(1000,original.weight+300):Math.max(100,Math.min(900,Math.round(original.weight*weightScale(context))));
+                if(original==null){original=new OriginalStyle(old,state.adjustment);originalStyles.put(text,original);}
+                int weight=state.bold?Math.min(1000,original.weight+300):Math.max(100,Math.min(900,Math.round(original.weight*state.scale)));
                 boolean italic=original.italic;
                 Typeface face;
-                if(miSansEnabled(context)) {
+                if(state.miSans) {
                     int axis=WeatherTextFonts.miSansAxis(weight);
                     face=WeatherWidgetFonts.face(context,axis,weight);
                     if(italic)face=Typeface.create(face,weight,true);
-                } else if(followsSystemWeight(context))face=original.face;
+                } else if(state.follow)face=original.face;
                 else face=WeatherTextFonts.systemFace(original.face,original.weight,weight,italic);
                 if(old!=face)text.setTypeface(face);
             }
         }
         if(root instanceof ViewGroup) {
             ViewGroup group=(ViewGroup)root;
-            for(int i=0;i<group.getChildCount();i++)apply(context,group.getChildAt(i));
+            for(int i=0;i<group.getChildCount();i++)apply(context,group.getChildAt(i),state);
         }
     }
     public static void apply(Activity activity) {apply(activity,activity.getWindow().getDecorView());}

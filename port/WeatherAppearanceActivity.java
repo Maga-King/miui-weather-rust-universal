@@ -26,9 +26,6 @@ public final class WeatherAppearanceActivity extends WeatherWidgetSettingsActivi
                 enabled->{WeatherFonts.setFollowsSystemWeight(this,enabled);updateWeightControls();WeatherFonts.apply(this);});
         weightControls(content);
         note(content,chinese?"字体更改将在返回天气时应用。":"Font changes apply when you return to Weather.");
-        note(content,chinese?"天气动画":"Weather animation");
-        toggle(content,chinese?"原生分辨率渲染":"Render at native resolution",chinese?"使用屏幕分辨率呈现天气动画":"Render weather animation at the screen resolution",WeatherRenderPreferences.nativeResolutionEnabled(this),
-                enabled->WeatherRenderPreferences.setNativeResolutionEnabled(this,enabled));
     }
 
     private void weightControls(LinearLayout parent) {

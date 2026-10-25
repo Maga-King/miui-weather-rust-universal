@@ -11,15 +11,25 @@ public final class AndroidWeatherPages {
     // Weather17's own fallback when the Mi Video package is absent (Z1.C0373l).
     public static final String WEATHER_VIDEO_FALLBACK = "https://www.weather.com.cn/video/";
     private final Activity activity;
+    public static final class PageException extends RuntimeException {
+        public final String code;
+        PageException(String code, String message, Throwable cause) {
+            super(message, cause); this.code = code;
+        }
+    }
 
     public AndroidWeatherPages(Activity activity) { this.activity = activity; }
 
     public Object handleCall(String channel, String method, Object arguments) {
         if (!"weather_method_channel".equals(channel)) return UNHANDLED;
         if ("start_rain_map_activity".equals(method) || "start_rain_map_activity_os4".equals(method)
-                || "start_aqi_map_activity".equals(method) || "start_aqi_map_activity_os4".equals(method)) {
+                || "start_aqi_map_activity".equals(method) || "start_aqi_map_activity_os4".equals(method)
+                || "start_typhoon_map_activity".equals(method) || "start_typhoon_map_activity_os4".equals(method)) {
             try { WeatherPagesRuntime.open(activity, method, arguments); }
-            catch (Exception error) { throw new IllegalStateException("Cannot open original weather page", error); }
+            catch (Exception error) {
+                Log.e("WeatherPages", "Cannot open " + method, error);
+                throw new PageException("weather_page_failed", "Cannot open original weather page: " + method, error);
+            }
             return null;
         }
         if ("start_weather_forecast_activity".equals(method)) {

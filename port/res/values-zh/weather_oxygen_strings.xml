@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="weather_oxygen_name">一加天气 · 今日</string>
+    <string name="weather_oxygen_quick_small_name">一加天气 · 快览 2×2</string>
+    <string name="weather_oxygen_quick_small_oos_name">一加天气 · 橙色快览 2×2</string>
+    <string name="weather_oxygen_quick_medium_name">一加天气 · 逐小时 4×2</string>
+    <string name="weather_oxygen_quick_large_name">一加天气 · 综合预报 4×4</string>
+    <string name="weather_oxygen_dragonfly_name">一加天气 · 全景天气 4×4</string>
+    <string name="weather_oxygen_seedling_strip_name">一加天气 · 简洁横条 2×1</string>
+    <string name="weather_oxygen_seedling_square_name">一加天气 · 简洁方卡 2×2</string>
+    <string name="weather_oxygen_glass_strip_name">一加天气 · 通透横条 2×1</string>
+    <string name="weather_oxygen_adaptive_name">一加天气 · 自适应天气</string>
+    <string name="weather_oxygen_temperature_name">一加天气 · 温度 1×1</string>
+    <string name="weather_oxygen_current_name">一加天气 · 天气实况 1×1</string>
+    <string name="weather_oxygen_uv_name">一加天气 · 紫外线 1×1</string>
+    <string name="weather_oxygen_sunrise_name">一加天气 · 日出日落 1×1</string>
+    <string name="weather_oxygen_rpk_micro_name">一加天气 · 迷你天气 1×1</string>
+    <string name="weather_oxygen_rpk_strip_name">一加天气 · 信息横条 2×1</string>
+    <string name="weather_oxygen_rpk_today_name">一加天气 · 今日详情 2×2</string>
+</resources>

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="weather_oxygen_name">OnePlus daily weather</string>
+    <string name="weather_oxygen_quick_small_name">OnePlus quick weather 2x2</string>
+    <string name="weather_oxygen_quick_small_oos_name">OnePlus orange quick weather 2x2</string>
+    <string name="weather_oxygen_quick_medium_name">OnePlus hourly weather 4x2</string>
+    <string name="weather_oxygen_quick_large_name">OnePlus forecast 4x4</string>
+    <string name="weather_oxygen_dragonfly_name">OnePlus panoramic weather 4x4</string>
+    <string name="weather_oxygen_seedling_strip_name">OnePlus compact strip 2x1</string>
+    <string name="weather_oxygen_seedling_square_name">OnePlus compact weather 2x2</string>
+    <string name="weather_oxygen_glass_strip_name">OnePlus translucent strip 2x1</string>
+    <string name="weather_oxygen_adaptive_name">OnePlus adaptive weather</string>
+    <string name="weather_oxygen_temperature_name">OnePlus temperature 1x1</string>
+    <string name="weather_oxygen_current_name">OnePlus conditions 1x1</string>
+    <string name="weather_oxygen_uv_name">OnePlus UV index 1x1</string>
+    <string name="weather_oxygen_sunrise_name">OnePlus sun times 1x1</string>
+    <string name="weather_oxygen_rpk_micro_name">OnePlus mini weather 1x1</string>
+    <string name="weather_oxygen_rpk_strip_name">OnePlus weather strip 2x1</string>
+    <string name="weather_oxygen_rpk_today_name">OnePlus today details 2x2</string>
+</resources>

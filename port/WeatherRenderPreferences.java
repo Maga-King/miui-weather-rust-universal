@@ -19,17 +19,14 @@ import android.view.WindowManager;
 /** App-local rendering choices. Display votes are requests, never measured FPS. */
 public final class WeatherRenderPreferences {
     private static final String FILE="weather_render_v1";
-    private static final String NATIVE_RESOLUTION="native_resolution",FORCE_120="force_120";
+    private static final String FORCE_120="force_120";
     private static boolean installed;
     private WeatherRenderPreferences() {}
     private static SharedPreferences prefs(Context context){return context.getSharedPreferences(FILE,Context.MODE_PRIVATE);}
-    public static boolean nativeResolutionEnabled(Context context){return prefs(context).getBoolean(NATIVE_RESOLUTION,true);}
-    public static void setNativeResolutionEnabled(Context context,boolean enabled){prefs(context).edit().putBoolean(NATIVE_RESOLUTION,enabled).apply();}
     public static boolean force120Enabled(Context context){return prefs(context).getBoolean(FORCE_120,false);}
     public static void setForce120Enabled(Context context,boolean enabled){prefs(context).edit().putBoolean(FORCE_120,enabled).apply();}
 
     private static native void nativeRefreshRate(float actualRefreshRate);
-    private static native boolean nativeResolution(boolean enabled);
 
     /** Also covers the original Java detail/settings activities. No global display setting is written. */
     public static void install(Application application){
@@ -102,14 +99,13 @@ public final class WeatherRenderPreferences {
     static final class Session implements AutoCloseable,DisplayManager.DisplayListener,SharedPreferences.OnSharedPreferenceChangeListener,SurfaceHolder.Callback {
         private final Activity activity;
         private final SurfaceView flutter,animation;
-        private final Runnable resolutionChanged;
         private final DisplayManager manager;
         private final SharedPreferences preferences;
         private final Handler main=new Handler(Looper.getMainLooper());
         private boolean resumed,closed;
         private float requested;
-        Session(Activity activity,SurfaceView flutter,SurfaceView animation,Runnable resolutionChanged){
-            this.activity=activity;this.flutter=flutter;this.animation=animation;this.resolutionChanged=resolutionChanged;
+        Session(Activity activity,SurfaceView flutter,SurfaceView animation){
+            this.activity=activity;this.flutter=flutter;this.animation=animation;
             manager=activity.getSystemService(DisplayManager.class);preferences=prefs(activity);
             flutter.getHolder().addCallback(this);
             resume();
@@ -132,13 +128,12 @@ public final class WeatherRenderPreferences {
             // Keep actual display refresh as diagnostics. The engine's compatibility
             // report is 120 Hz; NDK vsync callbacks/timestamps remain physical.
             nativeRefreshRate(rate.actual);
-            if(nativeResolution(nativeResolutionEnabled(activity)))resolutionChanged.run();
         }
         void animationSurfaceChanged(){if(resumed)requestSurface(animation.getHolder().getSurface(),requested);}
         @Override public void onDisplayAdded(int id){apply();}
         @Override public void onDisplayRemoved(int id){apply();}
         @Override public void onDisplayChanged(int id){apply();}
-        @Override public void onSharedPreferenceChanged(SharedPreferences prefs,String key){if(NATIVE_RESOLUTION.equals(key)||FORCE_120.equals(key))main.post(this::apply);}
+        @Override public void onSharedPreferenceChanged(SharedPreferences prefs,String key){if(FORCE_120.equals(key))main.post(this::apply);}
         @Override public void surfaceCreated(SurfaceHolder holder){apply();}
         @Override public void surfaceChanged(SurfaceHolder holder,int format,int width,int height){apply();}
         @Override public void surfaceDestroyed(SurfaceHolder holder){}

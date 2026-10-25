@@ -19,6 +19,7 @@
 #include <stdatomic.h>
 #include <android/hardware_buffer.h>
 #include <android/bitmap.h>
+#include <android/api-level.h>
 #include <media/NdkImageReader.h>
 #include "xdl.h"
 
@@ -33,13 +34,34 @@ static void host_log(const char *format, ...) {
 #define LOG(...) host_log(__VA_ARGS__)
 static uintptr_t engine_base;
 static AAsset *text_font_asset_open(AAssetManager *manager,const char *name,int mode) {
-    const char *alias="fonts/WeatherMiSansVF.ttf";
-    size_t length=name?strlen(name):0,alias_length=strlen(alias);
-    // Only this private Flutter engine's GOT is redirected. Keep the single
-    // existing bundled VF file, and leave Android/widget asset access alone.
-    if(length>=alias_length&&!strcmp(name+length-alias_length,alias))
+    // Flutter's Android asset provider prefixes manifest paths before opening
+    // them. Normalize only that exact prefix; unrelated assets stay untouched.
+    const char *font_name=name;
+    static const char prefix[]="flutter_assets/";
+    if(font_name&&!strncmp(font_name,prefix,sizeof(prefix)-1))font_name+=sizeof(prefix)-1;
+    static const char *const latin_weights[]={
+        "fonts/MiSans-250.ttf","fonts/MiSans-305.ttf","fonts/MiSans-330.ttf",
+        "fonts/MiSans-380.ttf","fonts/MiSans-450.ttf","fonts/MiSans-520.ttf"
+    };
+    static const char *const tibetan_weights[]={
+        "fonts/MiSansTibetan-250.ttf","fonts/MiSansTibetan-305.ttf","fonts/MiSansTibetan-330.ttf",
+        "fonts/MiSansTibetan-380.ttf","fonts/MiSansTibetan-450.ttf","fonts/MiSansTibetan-520.ttf"
+    };
+    // Only this private Flutter engine's GOT is redirected. Share the bundled
+    // variable fonts, leaving Android/widget asset access alone.
+    if(font_name&&!strcmp(font_name,"fonts/WeatherMiSansVF.ttf"))
         return AAssetManager_open(manager,"fonts/MiSansVF.ttf",mode);
-    return AAssetManager_open(manager,name,mode);
+    if(font_name&&!strcmp(font_name,"fonts/WeatherMiSansTibetanVF.ttf"))
+        return AAssetManager_open(manager,"fonts/MiSansTibetanVF.ttf",mode);
+    for(size_t i=0;i<sizeof(latin_weights)/sizeof(latin_weights[0]);i++) {
+        if(font_name&&!strcmp(font_name,latin_weights[i]))
+            return AAssetManager_open(manager,"fonts/MiSansVF.ttf",mode);
+    }
+    for(size_t i=0;i<sizeof(tibetan_weights)/sizeof(tibetan_weights[0]);i++) {
+        if(font_name&&!strcmp(font_name,tibetan_weights[i]))
+            return AAssetManager_open(manager,"fonts/MiSansTibetanVF.ttf",mode);
+    }
+    return name?AAssetManager_open(manager,name,mode):NULL;
 }
 static void locate_engine(void *interface) {
     Dl_info engine={0};
@@ -208,7 +230,7 @@ static TextFaces weighted_text_faces(void *collection,const TextFamilies *famili
         // starting axis preserves Xiaomi's light/regular/medium title design.
         float axis=330;
         unsigned base=(unsigned)style&0xffffu;
-        if(!strcmp(family,"sans-serif")||!*family) {
+        if(!strcmp(family,"sans-serif")||!strcmp(family,"sans-serif-tibt")||!*family) {
             const int weights[]={100,200,300,350,400,500,600,700,800,900};
             const int values[]={150,200,250,305,330,380,450,450,520,600};
             axis=600;
@@ -400,26 +422,42 @@ static ANativeWindow *mgl_window;
 static uint64_t mgl_generation,mgl_token,mgl_surface_id;
 static int mgl_width,mgl_height;
 static float mgl_x,mgl_y;
+static void *mgl_input_window;
 static atomic_uint display_refresh_millihz;
-static int mgl_native_resolution=1;
-static uint32_t *mgl_render_scale_instruction;
-// All patches below are one aligned AArch64 instruction, checked against this
-// frozen renderer before writing. No scene, shader, quality tier or animation
-// timestamp is replaced. Only its extra frame-rate gate and render scale change.
-static int mgl_patch_instruction(uint32_t *target,uint32_t value) {
-    if(*target==value)return 1;
-    size_t page=(size_t)sysconf(_SC_PAGESIZE);
-    uintptr_t start=(uintptr_t)target&~(page-1);
-    if(mprotect((void *)start,page,PROT_READ|PROT_WRITE|PROT_EXEC)){
-        LOG("MGL render instruction write denied errno=%d",errno);return 0;
-    }
-    __atomic_store_n(target,value,__ATOMIC_RELEASE);
-    __builtin___clear_cache((char *)target,(char *)(target+1));
-    if(mprotect((void *)start,page,PROT_READ|PROT_EXEC)){
-        LOG("MGL render instruction protection restore failed errno=%d",errno);return 0;
-    }
-    return 1;
+#include "choreographer_compat.h"
+static unsigned choreographer_actual_refresh(void) {
+    return atomic_load(&display_refresh_millihz);
 }
+static int bind_engine_choreographer(void) {
+    // Frozen engine c34303c381e3d1e16350426a04ca92d07e0f2c23. Verify the
+    // lazy accessor before calling it and verify all seven proc names after it.
+    static const uint32_t accessor[]={0xa9bf4ffe,0xb0002048,0x91284108,0x08dffd08,
+        0x360000a8,0xb0002040,0x91286000,0xa8c14ffe,0xd65f03c0};
+    if(!engine_base || memcmp((void *)(engine_base+0xd1c6ac),accessor,sizeof(accessor)))return 0;
+    WeatherAndroidProc *(*get_table)(void)=(void *)(engine_base+0xd1c6ac);
+    WeatherAndroidProc *table=get_table();
+    if((uintptr_t)table!=engine_base+0x1125a18)return 0;
+    void *android=dlopen("libandroid.so",RTLD_NOW|RTLD_LOCAL);
+    WeatherPostFrameLegacy legacy=android ? (WeatherPostFrameLegacy)dlsym(android,"AChoreographer_postFrameCallback") : NULL;
+    int sdk=android_get_device_api_level();
+    int result=weather_bind_choreographer(table,sdk,legacy,choreographer_actual_refresh);
+    if(android)dlclose(android); // libandroid is also a permanent DT_NEEDED host dependency.
+    LOG("VSYNC Android API=%d path=%s",sdk,result==1 ? "native frame timeline" :
+        result==2 ? "platform frame64 compatibility" : result==3 ? "platform arm64 legacy compatibility" : "unsupported");
+    return result!=0;
+}
+static int mgl_layout_coordinate(float value) {
+    if(value!=value)return 0;
+    if(value<=(float)INT32_MIN)return INT32_MIN;
+    if(value>=(float)INT32_MAX)return INT32_MAX;
+    double shifted=(double)value+0.5;
+    int rounded=(int)shifted;
+    if(shifted<0&&(double)rounded>shifted)--rounded;
+    return rounded;
+}
+// Rendering instructions are patched in the packaged ELF by build.py. Verify
+// them here; do not create private executable pages that can lose those edits
+// when the system reclaims a background process's code pages.
 static int configure_mgl_rendering(void *library,uintptr_t base) {
     uint32_t *constructor=dlsym(library,"_ZN7weather9FrameSyncC2Ev");
     uint32_t *set_rate=dlsym(library,"_ZN7weather9FrameSync12setFrameRateEi");
@@ -429,17 +467,12 @@ static int configure_mgl_rendering(void *library,uintptr_t base) {
     // This removes the default 15 ms / configured 30/60 Hz software gate;
     // AChoreographer still supplies every actual display vsync and real delta.
     if((uintptr_t)constructor!=base+0xffc38||(uintptr_t)set_rate!=base+0xffec4||
-            (uintptr_t)scale!=base+0xee418||constructor[11]!=0xf9000808||
-            set_rate[0]!=0x7100043f||set_rate[12]!=0xf900081f||
-            scale[0]!=0xbd400400||scale[1]!=0xd65f03c0){
+            (uintptr_t)scale!=base+0xee418||constructor[11]!=0xf900081f||
+            set_rate[0]!=0x1400000c||set_rate[12]!=0xf900081f||
+            scale[0]!=0x1e2e1000||scale[1]!=0xd65f03c0){
         LOG("MGL unsupported frame pacing/render scale ABI");return 0;
     }
-    if(!mgl_patch_instruction(constructor+11,0xf900081f)||
-            !mgl_patch_instruction(set_rate,0x1400000c))return 0;
-    mgl_render_scale_instruction=scale;
-    if(!mgl_patch_instruction(scale,mgl_native_resolution?0x1e2e1000:0xbd400400))return 0;
-    LOG("MGL display-vsync pacing enabled; native resolution=%d render scale=%s",
-        mgl_native_resolution,mgl_native_resolution?"1.0":"original device scale");
+    LOG("MGL packaged display-vsync pacing verified; native resolution forced render scale=1.0");
     return 1;
 }
 JNIEXPORT void JNICALL Java_dev_weather_oneplus_WeatherRenderPreferences_nativeRefreshRate(JNIEnv *env,jclass cls,jfloat actual) {
@@ -449,17 +482,6 @@ JNIEXPORT void JNICALL Java_dev_weather_oneplus_WeatherRenderPreferences_nativeR
     unsigned previous=atomic_exchange(&display_refresh_millihz,rate);
     if(previous==rate)return;
     LOG("DISPLAY actual refresh=%.3f Hz; engine compatibility report=120 Hz (not measured FPS)",rate/1000.0);
-}
-JNIEXPORT jboolean JNICALL Java_dev_weather_oneplus_WeatherRenderPreferences_nativeResolution(JNIEnv *env,jclass cls,jboolean enabled) {
-    (void)env;(void)cls;
-    int next=enabled?1:0;
-    if(next==mgl_native_resolution)return JNI_FALSE;
-    if(mgl_render_scale_instruction&&
-            !mgl_patch_instruction(mgl_render_scale_instruction,next?0x1e2e1000:0xbd400400))return JNI_FALSE;
-    mgl_native_resolution=next;
-    LOG("MGL native resolution preference=%d",next);
-    // Before engine startup there is no window to recreate yet.
-    return mgl_render_scale_instruction?JNI_TRUE:JNI_FALSE;
 }
 static void init_mgl_lock(void) {
     pthread_mutexattr_t attr;pthread_mutexattr_init(&attr);
@@ -497,6 +519,7 @@ static uint64_t mgl_create_surface(float x,float y,uint64_t token,uint64_t surfa
     mgl_callback=callback?*callback:NULL;
     if(callback)*callback=NULL; // Move the original unique_ptr into this provider.
     mgl_token=token;mgl_surface_id=surface_id;mgl_width=width;mgl_height=height;mgl_x=x;mgl_y=y;
+    mgl_input_window=NULL;
     ++mgl_generation;
     LOG("MGL create original scene token=%llu surface=%llu size=%dx%d callback=%p generation=%llu",
         (unsigned long long)token,(unsigned long long)surface_id,width,height,mgl_callback,
@@ -509,19 +532,24 @@ static uint64_t mgl_create_surface_origin(uint64_t token,uint64_t surface_id,voi
     return mgl_create_surface(0,0,token,surface_id,(int)viewport[1],(int)viewport[2],callback);
 }
 static void mgl_update_position(float x,float y,void *native_window,uint64_t token,uint64_t surface_id) {
-    (void)native_window;
     lock_mgl();
     if(mgl_callback&&token==mgl_token&&surface_id==mgl_surface_id){
-        mgl_x=x;mgl_y=y;request_mgl_surface();
+        int changed=mgl_layout_coordinate(x)!=mgl_layout_coordinate(mgl_x)||
+            mgl_layout_coordinate(y)!=mgl_layout_coordinate(mgl_y)||native_window!=mgl_input_window;
+        mgl_x=x;mgl_y=y;mgl_input_window=native_window;
+        if(changed)request_mgl_surface();
     }
     pthread_mutex_unlock(&mgl_lock);
 }
 static void mgl_update_surface(float x,float y,void *native_window,uint64_t token,uint64_t surface_id,
         int width,int height) {
-    (void)native_window;
     lock_mgl();
     if(mgl_callback&&token==mgl_token&&surface_id==mgl_surface_id){
-        mgl_x=x;mgl_y=y;mgl_width=width;mgl_height=height;request_mgl_surface();
+        int changed=mgl_layout_coordinate(x)!=mgl_layout_coordinate(mgl_x)||
+            mgl_layout_coordinate(y)!=mgl_layout_coordinate(mgl_y)||width!=mgl_width||height!=mgl_height||
+            native_window!=mgl_input_window;
+        mgl_x=x;mgl_y=y;mgl_width=width;mgl_height=height;mgl_input_window=native_window;
+        if(changed)request_mgl_surface();
     }
     pthread_mutex_unlock(&mgl_lock);
 }
@@ -529,6 +557,7 @@ static void mgl_destroy_surface(uint64_t token,uint64_t surface_id) {
     lock_mgl();
     if(mgl_callback&&token==mgl_token&&surface_id==mgl_surface_id){
         mgl_release_window();mgl_call_window(4,NULL);mgl_callback=NULL;
+        mgl_input_window=NULL;
         int attached;JNIEnv *env=thread_env(&attached);
         if(env&&mgl_java){
             (*env)->CallVoidMethod(env,mgl_java,mgl_hide_method,(jlong)mgl_generation);
@@ -668,6 +697,7 @@ static void mgl_unregister_image(int64_t id,uint64_t token) {
         ((void (*)(void*,int64_t))api[0xe0/8])(holder,id);
     }
 }
+#include "startup_frame_observer.h"
 static int bind_mgl_surfaces(void *library) {
     void *getter=dlsym(library,"_ZN7weather17LibSurfaceTexture42getCreateOnlineSurfaceViewWithPositionFuncEv");
     Dl_info native={0};
@@ -675,6 +705,7 @@ static int bind_mgl_surfaces(void *library) {
         LOG("MGL unsupported surface provider ABI");return 0;
     }
     if(!configure_mgl_rendering(library,(uintptr_t)native.dli_fbase))return 0;
+    bind_startup_frame_observer(library,(uintptr_t)native.dli_fbase);
     const struct {size_t offset;uintptr_t implementation;} providers[]={
         {0x146850,(uintptr_t)mgl_create_image_reader},
         {0x146858,(uintptr_t)mgl_unregister_image},
@@ -823,6 +854,7 @@ JNIEXPORT jstring JNICALL Java_dev_weather_oneplus_WeatherActivity_startEngine(J
     }
     if (!api || api[0] != 0x268) { snprintf(error, sizeof(error), "Unexpected engine interface"); goto done; }
     locate_engine(api);
+    if(!bind_engine_choreographer()){snprintf(error,sizeof(error),"Unsupported platform frame callback ABI");goto done;}
     if(!bind_font_manifest()){snprintf(error,sizeof(error),"Font manifest selection failed");goto done;}
     if(!bind_text_weight()){snprintf(error,sizeof(error),"Text weight matcher binding failed");goto done;}
     if(!bind_corner_textures(more)){snprintf(error,sizeof(error),"Engine corner textures could not be loaded");goto done;}

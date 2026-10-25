@@ -39,21 +39,24 @@ public final class AndroidLocation {
     private static final long GEOCODER_TIMEOUT_MS = 2500;
     private static final long MAX_FIX_AGE_NANOS = 120000000000L;
     private final Activity activity;
+    private final AndroidPermissions permissions;
     private final LocationManager manager;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Set<Query> queries = new HashSet<>();
     private boolean resumed;
     private boolean destroyed;
 
-    public AndroidLocation(Activity activity) {
+    public AndroidLocation(Activity activity, AndroidPermissions permissions) {
         this.activity = activity;
+        this.permissions = permissions;
         manager = activity.getSystemService(LocationManager.class);
     }
 
     /**
      * Returns true only for a supported channel/method. Reply is delivered once,
      * asynchronously on the main thread, with the caller's original method codec.
-     * This class never requests or changes a permission.
+     * Foreground location operations use the standard permission queue when the
+     * original Dart path omitted a grant request. Checks/reverse geocoding do not.
      */
     public boolean handle(String channel, String method, Object arguments, Result result) {
         if ("weather_method_channel".equals(channel) && "get_xms_core_version".equals(method)) {
@@ -71,11 +74,22 @@ public final class AndroidLocation {
         if (!weather && !xms && !reverse) return false;
         main.post(() -> {
             if (destroyed) return;
-            Query query = new Query(xms || reverse, result);
-            queries.add(query);
-            if (reverse) query.reverse(arguments); else query.start();
+            if (!reverse && resumed && !permissions.hasForegroundLocation()) {
+                Log.i(TAG, "Foreground location is waiting for an Android permission grant");
+                permissions.requestForegroundLocation(granted -> {
+                    if (destroyed) return;
+                    if (!granted) result.error("PERMISSION_DENIED", "Location permission has not been granted");
+                    else beginQuery(xms, false, arguments, result);
+                });
+            } else beginQuery(xms || reverse, reverse, arguments, result);
         });
         return true;
+    }
+
+    private void beginQuery(boolean stringResult, boolean reverse, Object arguments, Result result) {
+        Query query = new Query(stringResult, result);
+        queries.add(query);
+        if (reverse) query.reverse(arguments); else query.start();
     }
 
     public void onResume() {

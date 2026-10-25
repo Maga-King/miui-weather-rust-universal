@@ -3,11 +3,13 @@ package dev.weather.oneplus;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.database.Cursor;
-import android.database.sqlite.SQLiteDatabase;
 import android.util.Log;
 import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.Locale;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Iterator;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -16,20 +18,60 @@ public final class WeatherWidgetExtendedData {
     private WeatherWidgetExtendedData() {}
 
     public static JSONObject read(Context context, WeatherWidgetData selected) {
-        JSONObject out = empty();
-        JSONArray cities = new JSONArray();
-        JSONObject selectedRaw = null;
+        return snapshot(context, selected).details(selected);
+    }
+
+    /** One update batch owns this snapshot; it never survives into the next refresh. */
+    static final class Snapshot {
+        final JSONArray cities = new JSONArray();
+        final Map<String, WeatherWidgetData> observations = new LinkedHashMap<>();
+        final Map<String, JSONObject> raw = new LinkedHashMap<>();
+        private final Map<String, JSONObject> parsed = new LinkedHashMap<>();
+        String first = "", located = "", locale = "";
+        final long now = System.currentTimeMillis();
+
+        String defaultCity(boolean preferLocated) {
+            return preferLocated && !located.isEmpty() ? located : first;
+        }
+        WeatherWidgetData city(String id) { return observations.get(id); }
+        JSONObject details(WeatherWidgetData selected) {
+            JSONObject out = empty();
+            try {
+                out.put("cities", cities);
+                if (selected == null || !raw.containsKey(selected.cityId)) return out;
+                String key = selected.cityId + "|" + selected.unit;
+                JSONObject value = parsed.get(key);
+                if (value == null) {
+                    value = parse(raw.get(selected.cityId), selected.unit, locale, now);
+                    parsed.put(key, value);
+                }
+                // The envelope is per instance (panel/secondCityId must not leak).
+                // Forecast arrays are read-only inputs to the renderers.
+                for (Iterator<String> keys = value.keys(); keys.hasNext();) {
+                    String field = keys.next();
+                    if (!"cities".equals(field)) out.put(field, value.get(field));
+                }
+            } catch (Exception error) {
+                Log.w("WeatherWidget", "Cached detail unavailable: " + error.getClass().getSimpleName());
+            }
+            return out;
+        }
+    }
+
+    static Snapshot snapshot(Context context, WeatherWidgetData selected) {
+        Snapshot snapshot = new Snapshot();
         try {
             String unit = WeatherDatabaseBridge.temperatureUnit(context);
             Locale locale = context.getResources().getConfiguration().getLocales().get(0);
+            snapshot.locale = locale.toString();
             if (context.getDatabasePath("weather.db").isFile()) {
-                try (SQLiteDatabase db = SQLiteDatabase.openDatabase(
-                        context.getDatabasePath("weather.db").getAbsolutePath(), null,
-                        SQLiteDatabase.OPEN_READONLY | SQLiteDatabase.NO_LOCALIZED_COLLATORS);
+                try (WeatherReadDatabase db = WeatherReadDatabase.open(context);
                      Cursor rows = db.rawQuery("SELECT posID,name,extra,latitude,longtitude,flag "
                              + "FROM selectedcity ORDER BY position ASC,flag DESC", null)) {
                     while (rows.moveToNext()) {
                         String id = text(rows, 0), name = text(rows, 1);
+                        if (!id.isEmpty() && snapshot.first.isEmpty()) snapshot.first = id;
+                        if (!id.isEmpty() && rows.getInt(5) == 1 && snapshot.located.isEmpty()) snapshot.located = id;
                         if (id.isEmpty() || name.isEmpty()) continue;
                         JSONObject raw = null;
                         try (Cursor data = db.rawQuery("SELECT data1,minute_rain_data FROM raw WHERE city_id=? LIMIT 1",
@@ -51,7 +93,10 @@ public final class WeatherWidgetExtendedData {
                         if (network != null && (raw == null || observed(network) > observed(raw))) raw = network;
                         // Per-city background responses are already identity/unit checked by the cache.
                         // Parse this same raw object below, keeping observation and detail fields atomic.
-                        JSONObject widgetRaw = WeatherWidgetCityCache.raw(context, id);
+                        WeatherDatabaseBridge.City saved = new WeatherDatabaseBridge.City(id, name,
+                                text(rows, 2), text(rows, 3), text(rows, 4), rows.getInt(5) == 1,
+                                locale.toString(), unit);
+                        JSONObject widgetRaw = WeatherWidgetCityCache.raw(context, saved);
                         if (widgetRaw != null && (raw == null || observed(widgetRaw) >= observed(raw)))
                             raw = widgetRaw;
                         WeatherWidgetData city = null;
@@ -60,28 +105,21 @@ public final class WeatherWidgetExtendedData {
                             catch (Exception ignored) { /* Do not invent an observation for a saved city. */ }
                         }
                         if (selected != null && selected.cityId.equals(id)) {
-                            selectedRaw = raw;
                             if (city == null || (selected.unit.equals(unit) && selected.observedAtMs > city.observedAtMs))
                                 city = selected;
                         }
-                        if (city != null) cities.put(city.toJson());
+                        if (raw != null) snapshot.raw.put(id, raw);
+                        if (city != null) {
+                            snapshot.cities.put(city.toJson());
+                            snapshot.observations.put(id, city);
+                        }
                     }
                 }
             }
-            out.put("cities", cities);
-            if (selectedRaw != null && selected != null) {
-                JSONObject detail = parse(selectedRaw, selected.unit, locale.toString(), System.currentTimeMillis());
-                out.put("hourly", detail.getJSONArray("hourly"));
-                out.put("daily", detail.getJSONArray("daily"));
-                out.put("humidity", detail.getString("humidity"));
-                out.put("wind", detail.getString("wind"));
-                out.put("feelsLike", detail.getString("feelsLike"));
-            }
         } catch (Exception error) {
             Log.w("WeatherWidget", "Extended cached weather unavailable: " + error.getClass().getSimpleName());
-            try { out.put("cities", cities); } catch (Exception ignored) {}
         }
-        return out;
+        return snapshot;
     }
 
     private static JSONObject cachedNetwork(Context context, String identity) {
@@ -103,7 +141,7 @@ public final class WeatherWidgetExtendedData {
     private static JSONObject empty() {
         JSONObject out = new JSONObject();
         try { out.put("cities", new JSONArray()).put("hourly", new JSONArray())
-                .put("daily", new JSONArray()).put("humidity", "").put("wind", "").put("feelsLike", ""); }
+                .put("daily", new JSONArray()).put("humidity", "").put("wind", "").put("feelsLike", "").put("uvIndex", ""); }
         catch (Exception ignored) {}
         return out;
     }
@@ -115,6 +153,14 @@ public final class WeatherWidgetExtendedData {
         JSONObject current = raw.optJSONObject("current");
         if (ok(current)) {
             out.put("humidity", measurement(current.optJSONObject("humidity")));
+            // The provider publishes a scalar index, including a valid zero at night.
+            // Missing/malformed values must not become a fabricated zero.
+            String uv = current.optString("uvIndex", "").trim();
+            try {
+                double number = Double.parseDouble(uv);
+                if (Double.isFinite(number) && number >= 0)
+                    out.put("uvIndex", new java.math.BigDecimal(uv).stripTrailingZeros().toPlainString());
+            } catch (NumberFormatException ignored) { /* Optional provider field. */ }
             JSONObject feels = current.optJSONObject("feelsLike");
             if (ok(feels)) out.put("feelsLike", temperature(feels.optString("value", ""), feels.optString("unit", ""), unit));
             JSONObject wind = current.optJSONObject("wind");

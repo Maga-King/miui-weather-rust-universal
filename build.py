@@ -20,6 +20,7 @@ import zipfile
 from port.patch_dpi_settings import patch as patch_dpi_settings
 from port.patch_widget_settings import patch as patch_widget_settings
 from port.patch_weather_locale import patch as patch_weather_locale
+from port.patch_mgl_rendering import patch as patch_mgl_rendering
 
 ROOT = Path(__file__).resolve().parent
 WORK = ROOT / ".build"
@@ -31,6 +32,27 @@ EDITIONS = {
     "test": ("dev.weather.test", "weather-oneplus-experimental.apk"),
 }
 MIPUSH_SHA256 = "bce8d29a119c0a85fd0e56e577ec291ddfb8edda1c0f901f3de467b7ca578644"
+WEBKIT_VERSION = "1.18.0"
+WEBKIT_SHA256 = "f15a0bd7d51f4bb8dffdd3a2cf5829f9a7de9ad4ba2682fa85d619032050581f"
+
+
+def webkit_jar() -> Path:
+    directory = WORK / "dependencies"
+    directory.mkdir(parents=True, exist_ok=True)
+    archive = directory / f"webkit-{WEBKIT_VERSION}.aar"
+    if not archive.exists() or digest(archive.read_bytes()) != WEBKIT_SHA256:
+        url = f"https://dl.google.com/dl/android/maven2/androidx/webkit/webkit/{WEBKIT_VERSION}/webkit-{WEBKIT_VERSION}.aar"
+        with urllib.request.urlopen(url, timeout=60) as response:
+            data = response.read()
+        if digest(data) != WEBKIT_SHA256:
+            raise ValueError("AndroidX WebKit artifact SHA-256 mismatch")
+        archive.write_bytes(data)
+    jar = directory / f"webkit-{WEBKIT_VERSION}.jar"
+    with zipfile.ZipFile(archive) as source:
+        data = source.read("classes.jar")
+    if not jar.exists() or jar.read_bytes() != data:
+        jar.write_bytes(data)
+    return jar
 
 
 def digest(data: bytes) -> str:
@@ -194,7 +216,7 @@ def compile_java(tc: dict[str, Path], inputs: Path) -> tuple[Path, Path, Path]:
     run(tc["javac"], "--release", "8", "-encoding", "UTF-8", "-classpath",
         os.pathsep.join(map(str, [tc["android"], stub_classes])), "-d", module, *module_sources)
     run(tc["javac"], "--release", "8", "-encoding", "UTF-8", "-classpath",
-        os.pathsep.join(map(str, [tc["android"], splash, splash_jar, mipush, stub_classes])), "-d", host, *host_sources)
+        os.pathsep.join(map(str, [tc["android"], splash, splash_jar, mipush, stub_classes, webkit_jar()])), "-d", host, *host_sources)
     return host, splash, module
 
 
@@ -211,6 +233,21 @@ def is_signature(name: str) -> bool:
     upper = name.upper()
     return upper == "META-INF/MANIFEST.MF" or (upper.startswith("META-INF/")
             and upper.endswith((".SF", ".RSA", ".DSA", ".EC")))
+
+
+def prune_aliased_font_assets(entries: dict[str, bytes], font_manifest: list[dict]) -> None:
+    """Remove static MiSans weights only after their families point at bundled VFs."""
+    aliased = {
+        *(f"assets/flutter_assets/fonts/MiSans-{weight}.ttf" for weight in (250, 305, 330, 380, 450, 520)),
+        *(f"assets/flutter_assets/fonts/MiSansTibetan-{weight}.ttf" for weight in (250, 305, 330, 380, 450, 520)),
+    }
+    used = {"assets/flutter_assets/" + font["asset"]
+            for family in font_manifest for font in family["fonts"]}
+    variables = {"assets/fonts/MiSansVF.ttf", "assets/fonts/MiSansTibetanVF.ttf"}
+    if aliased & used or not aliased <= entries.keys() or not variables <= entries.keys():
+        raise ValueError("Static MiSans font alias/asset state changed")
+    for name in aliased:
+        del entries[name]
 
 
 def compare_payload(edition: str, actual: dict[str, str], strict: bool) -> dict:
@@ -264,6 +301,7 @@ def build_edition(edition: str, tc: dict[str, Path], inputs: Path,
     run(tc["java"], "-cp", tc["d8"], "com.android.tools.r8.D8", "--lib", tc["android"],
         "--min-api", "28", "--output", stage, *host_classes, *sorted(splash.rglob("*.class")),
         inputs / "splash/splash-runtime-isolated.jar", inputs / "mipush/MiPush_SDK_Client_6_0_1-C.jar",
+        webkit_jar(),
         required(inputs / "pages/original-weather-pages.dex"), *sorted(module.rglob("*.class")))
     dex=stage / "classes.dex"
     dex.write_bytes(patch_weather_locale(dex.read_bytes()))
@@ -287,6 +325,8 @@ def build_edition(edition: str, tc: dict[str, Path], inputs: Path,
             entries[name] = path.read_bytes()
     for name, path in native.items():
         entries["lib/arm64-v8a/" + name] = path.read_bytes()
+    renderer = "lib/arm64-v8a/libhyper_opengl.so"
+    entries[renderer] = patch_mgl_rendering(entries[renderer])
     entries["lib/arm64-v8a/libapp.so"] = patch_widget_settings(patch_dpi_settings(
         required(inputs / "variants" / edition / "libapp.so").read_bytes(), tc["clang"]), tc["clang"])
     # Preserve ALL frozen asset bytes. Only explicitly supplied edition overlays differ.
@@ -302,18 +342,31 @@ def build_edition(edition: str, tc: dict[str, Path], inputs: Path,
     font_manifest=json.loads(entries["assets/flutter_assets/FontManifest.json"])
     system_fonts=[family for family in font_manifest if family["family"].startswith("packages/hyperos/")]
     entries["assets/flutter_assets/FontSystem__.json"]=json.dumps(system_fonts,separators=(",",":"),ensure_ascii=False).encode("utf-8")
-    # The in-app engine aliases this asset to the existing fonts/MiSansVF.ttf.
+    # The in-app engine aliases these assets to the bundled variable fonts.
     # No duplicated font data, changes to symbol fonts or widget font assets.
     for family in font_manifest:
         if family["family"] == "sans-serif" or family["family"] == "sans-serif-medium" or family["family"].startswith("mipro-"):
             for font in family["fonts"]:
                 font["asset"]="fonts/WeatherMiSansVF.ttf"
+        elif family["family"] == "sans-serif-tibt":
+            for font in family["fonts"]:
+                font["asset"]="fonts/WeatherMiSansTibetanVF.ttf"
     entries["assets/flutter_assets/FontManifest.json"]=json.dumps(font_manifest,separators=(",",":"),ensure_ascii=False).encode("utf-8")
+    # Static Latin and Tibetan MiSans weights are superseded by variable fonts.
+    # Keep HyperOS icon/symbol, widget, and system font assets.
+    prune_aliased_font_assets(entries, font_manifest)
     unsigned = stage / "unsigned.apk"
     with zipfile.ZipFile(unsigned, "w") as output:
         for name, data in entries.items():
             info = zipfile.ZipInfo(name, date_time=(2000, 1, 1, 0, 0, 0))
-            info.compress_type = zipfile.ZIP_STORED if name == "resources.arsc" else zipfile.ZIP_DEFLATED
+            # AssetManagerFontStyleSet opens the same variable font for several
+            # named weights. Compressed assets inflated the 20 MB MiSans buffer
+            # repeatedly on Flutter's layout thread (1.6-1.8 s on the OS4 probe).
+            # Stored/aligned font bytes can be mapped directly by both Flutter
+            # and Android; keep every glyph/weight and all existing alias paths.
+            mapped_asset = name == "resources.arsc" or (
+                name.startswith("assets/") and name.lower().endswith((".ttf", ".otf")))
+            info.compress_type = zipfile.ZIP_STORED if mapped_asset else zipfile.ZIP_DEFLATED
             output.writestr(info, data)
     aligned = stage / "aligned.apk"
     run(tc["zipalign"], "-f", "-P", "16", "4", unsigned, aligned)

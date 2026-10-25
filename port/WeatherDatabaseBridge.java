@@ -3,7 +3,6 @@ package dev.weather.oneplus;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.database.Cursor;
-import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteException;
 import android.util.Base64;
 import android.util.Log;
@@ -18,12 +17,23 @@ import org.json.JSONObject;
 /** Read-only access to the original Dart SQLite database. Never creates or updates it. */
 public final class WeatherDatabaseBridge {
     private WeatherDatabaseBridge() {}
+    static final String HAS_CACHED_WEATHER_QUERY="SELECT 1 FROM raw WHERE city_id=(SELECT posID FROM selectedcity "
+        +"ORDER BY position ASC,flag DESC LIMIT 1) AND length(data1)>2 LIMIT 1";
+
+    /** Cheap existence check only; never parse forecasts on the startup thread. */
+    static boolean hasCachedWeather(Context context) {
+        if(!context.getDatabasePath("weather.db").isFile())return false;
+        try(WeatherReadDatabase db=WeatherReadDatabase.open(context);
+            Cursor rows=db.rawQuery(HAS_CACHED_WEATHER_QUERY,null)){
+            return rows.moveToFirst();
+        }catch(SQLiteException error){return false;}
+    }
 
     /** False only when the database is absent or a successful query confirms no city. */
     public static boolean hasSelectedCity(Context context) {
         File file = context.getDatabasePath("weather.db");
         if (!file.isFile()) return false;
-        try (SQLiteDatabase db = open(file);
+        try (WeatherReadDatabase db = WeatherReadDatabase.open(context);
              Cursor rows = db.rawQuery("SELECT 1 FROM selectedcity LIMIT 1", null)) {
             return rows.moveToFirst();
         } catch (SQLiteException error) {
@@ -37,7 +47,7 @@ public final class WeatherDatabaseBridge {
     static City firstCity(Context context) {
         File file = context.getDatabasePath("weather.db");
         if (!file.isFile()) return null;
-        try (SQLiteDatabase db = open(file);
+        try (WeatherReadDatabase db = WeatherReadDatabase.open(context);
              Cursor row = db.rawQuery("SELECT posID,name,extra,latitude,longtitude,flag,locale "
                      + "FROM selectedcity ORDER BY position ASC, flag DESC LIMIT 1", null)) {
             if (!row.moveToFirst()) return null;
@@ -54,7 +64,7 @@ public final class WeatherDatabaseBridge {
         if (!file.isFile()) return cities;
         String locale = context.getResources().getConfiguration().getLocales().get(0).toString();
         String unit = temperatureUnit(context);
-        try (SQLiteDatabase db = open(file);
+        try (WeatherReadDatabase db = WeatherReadDatabase.open(context);
              Cursor row = db.rawQuery("SELECT posID,name,extra,latitude,longtitude,flag,locale "
                      + "FROM selectedcity ORDER BY position ASC, flag DESC", null)) {
             while (row.moveToNext()) cities.add(new City(text(row, 0), text(row, 1), text(row, 2),
@@ -77,7 +87,7 @@ public final class WeatherDatabaseBridge {
         try {
             City city = firstCity(context);
             if (city == null || !city.valid()) return null;
-            try (SQLiteDatabase db = open(context.getDatabasePath("weather.db"));
+            try (WeatherReadDatabase db = WeatherReadDatabase.open(context);
                  Cursor row = db.rawQuery("SELECT data1,minute_rain_data FROM raw WHERE city_id=? LIMIT 1",
                          new String[]{city.id})) {
                 if (!row.moveToFirst() || row.isNull(0)) return null;
@@ -97,10 +107,6 @@ public final class WeatherDatabaseBridge {
         }
     }
 
-    private static SQLiteDatabase open(File file) {
-        return SQLiteDatabase.openDatabase(file.getAbsolutePath(), null,
-                SQLiteDatabase.OPEN_READONLY | SQLiteDatabase.NO_LOCALIZED_COLLATORS);
-    }
     private static String text(Cursor row, int index) {
         return row.isNull(index) ? "" : row.getString(index).trim();
     }

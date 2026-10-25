@@ -32,8 +32,8 @@ final class WeatherWidgetSizing {
         if (sizes.isEmpty()) {
             boolean landscape=context.getResources().getConfiguration().orientation
                     ==android.content.res.Configuration.ORIENTATION_LANDSCAPE;
-            int w=style==1||style==2||style==5||style==6?340:150;
-            int h=style==1||style==3?60:style==6?340:150;
+            int w=WeatherWidgetCatalog.defaultWidthDp(style);
+            int h=WeatherWidgetCatalog.defaultHeightDp(style);
             int width=options.getInt(landscape?AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH
                     :AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH,w);
             int height=options.getInt(landscape?AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT

@@ -106,7 +106,7 @@ final class WeatherWidgetRenderer {
         }
         if (type >= 0 && type <= 25) {
             int icon = icon(type);
-            asset(canvas, "weather1/weather_" + icon + "/" + (icon <= 3 && duration < 3 ? "night" : "day") + ".png", 111, 14, 26, 26);
+            asset(canvas, "weather1/weather_" + icon + "/" + (icon <= 3 && WeatherWidgetDayNight.night(data, now) ? "night" : "day") + ".png", 111, 14, 26, 26);
         }
         return bitmap;
     }
@@ -230,18 +230,25 @@ final class WeatherWidgetRenderer {
         Calendar calendar = Calendar.getInstance(data != null && !data.zoneId.isEmpty()
             ? TimeZone.getTimeZone(data.zoneId) : TimeZone.getDefault());
         calendar.setTimeInMillis(now);
-        double minute = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE);
+        // Original MAML compares #time_sys against sunrise/sunset timestamps.
+        // Retain seconds and milliseconds so fractional phase boundaries do not
+        // wait for the next whole minute before choosing their original artwork.
+        double time = calendar.get(Calendar.HOUR_OF_DAY) * 3600000L
+            + calendar.get(Calendar.MINUTE) * 60000L
+            + calendar.get(Calendar.SECOND) * 1000L + calendar.get(Calendar.MILLISECOND);
         // Unknown sunrise/sunset only affects decorative appearance, never weather values.
-        double rise = data != null && data.sunriseMinute >= 0 ? data.sunriseMinute : 360;
-        double set = data != null && data.sunsetMinute > rise ? data.sunsetMinute : 1080;
+        double riseMinute = data != null && data.sunriseMinute >= 0 ? data.sunriseMinute : 360;
+        double setMinute = data != null && data.sunsetMinute > riseMinute ? data.sunsetMinute : 1080;
+        double rise = riseMinute * 60000, set = setMinute * 60000;
         double day12 = (set - rise) / 12, day6 = (set - rise) / 6;
-        double night12 = (1440 - set + rise) / 12, night36 = (1440 - set + rise) / 36;
+        double night12 = (rise - (set - 86400000)) / 12, night36 = (rise - (set - 86400000)) / 36;
         double[] bounds = {rise - 3 * night12, rise - 2 * night12, rise - night12, rise,
             rise + day12, rise + 2 * day12, rise + 2 * day12 + day6,
             rise + 2 * day12 + 2 * day6, rise + 2 * day12 + 3 * day6,
-            rise + 2 * day12 + 4 * day6, set - day12, set,
+            rise + 2 * day12 + 4 * day6,
+            rise + 2 * day12 + 4 * day6 + day12, rise + 2 * day12 + 4 * day6 + 2 * day12,
             set + night36, set + 2 * night36, set + 3 * night36, set + 3 * night36 + night12};
-        for (int i = 0; i < bounds.length - 1; i++) if (minute >= bounds[i] && minute < bounds[i + 1]) return i + 1;
+        for (int i = 0; i < bounds.length - 1; i++) if (time >= bounds[i] && time < bounds[i + 1]) return i + 1;
         return 0;
     }
 }

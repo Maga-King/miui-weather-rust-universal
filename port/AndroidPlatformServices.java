@@ -63,6 +63,7 @@ public final class AndroidPlatformServices {
         if (BROADCAST.equals(channel)) {
             if ("startReceiver".equals(method)) return startReceiver(arguments);
             if ("stopReceiver".equals(method)) return stopReceiver(arguments);
+            if ("sendBroadcast".equals(method)) return sendBroadcast(arguments);
             return UNHANDLED;
         }
         if (SYMBOL.equals(channel) && "getFontWeightInfo".equals(method)) {
@@ -139,6 +140,31 @@ public final class AndroidPlatformServices {
             return null;
         } catch (RuntimeException error) {
             return "Cannot unregister broadcast receiver: " + error.getClass().getSimpleName();
+        }
+    }
+
+    private Object sendBroadcast(Object arguments) {
+        try {
+            String action = requiredString(value(arguments, "name"));
+            // Ordinary in-app delivery, including original weather action names.
+            // Do not send a port's private data to another installed weather app.
+            Intent intent = new Intent(action).setPackage(context.getPackageName());
+            for (Map.Entry<String, Object> entry : map(value(arguments, "data")).entrySet()) {
+                Object item = entry.getValue(); String key = entry.getKey();
+                if (item == null || item == JSONObject.NULL) intent.putExtra(key, (String)null);
+                else if (item instanceof String) intent.putExtra(key, (String)item);
+                else if (item instanceof Boolean) intent.putExtra(key, (Boolean)item);
+                else if (item instanceof Integer) intent.putExtra(key, (Integer)item);
+                else if (item instanceof Long) intent.putExtra(key, (Long)item);
+                else if (item instanceof Double) intent.putExtra(key, (Double)item);
+                else if (item instanceof byte[]) intent.putExtra(key, (byte[])item);
+                else throw new IllegalArgumentException("Unsupported broadcast extra type");
+            }
+            context.sendBroadcast(intent);
+            return null; // This plugin uses null for success and a String for errors.
+        } catch (RuntimeException error) {
+            Log.w(TAG, "Cannot send broadcast", error);
+            return "Cannot send broadcast: " + error.getClass().getSimpleName();
         }
     }
 
@@ -246,10 +272,16 @@ public final class AndroidPlatformServices {
         receivers.clear();
     }
 
-    private static Map<String, Object> intentValues(Intent intent) {
+    static Map<String, Object> intentValues(Intent intent) {
         Map<String, Object> values = new LinkedHashMap<>();
         values.put("action", intent.getAction());
         values.put("packageName", intent.getPackage());
+        if (intent.getComponent() != null) {
+            Map<String, Object> component = new LinkedHashMap<>();
+            component.put("packageName", intent.getComponent().getPackageName());
+            component.put("className", intent.getComponent().getClassName());
+            values.put("component", component);
+        }
         values.put("categories", intent.getCategories() == null ? Collections.emptyList() : new ArrayList<>(intent.getCategories()));
         values.put("data", intent.getDataString());
         values.put("flag", intent.getFlags());
@@ -281,7 +313,7 @@ public final class AndroidPlatformServices {
         return result;
     }
 
-    private static void putExtra(Intent intent, String type, String key, Object value) throws JSONException {
+    static void putExtra(Intent intent, String type, String key, Object value) throws JSONException {
         if (EXTRA_TYPES[0].equals(type)) intent.putExtra(key, integer(value));
         else if (EXTRA_TYPES[1].equals(type)) intent.putExtra(key, ((Number) value).doubleValue());
         else if (EXTRA_TYPES[2].equals(type)) intent.putExtra(key, (Boolean) value);
@@ -301,18 +333,18 @@ public final class AndroidPlatformServices {
         }
     }
 
-    private static Object value(Object object, String key) {
+    static Object value(Object object, String key) {
         Object value = object instanceof JSONObject ? ((JSONObject) object).opt(key)
                 : object instanceof Map ? ((Map<?, ?>) object).get(key) : null;
         return value == JSONObject.NULL ? null : value;
     }
 
-    private static String requiredString(Object value) {
+    static String requiredString(Object value) {
         if (!(value instanceof String) || ((String) value).isEmpty()) throw new IllegalArgumentException("Expected nonempty string");
         return (String) value;
     }
 
-    private static int integer(Object value) {
+    static int integer(Object value) {
         if (!(value instanceof Number)) throw new IllegalArgumentException("Expected integer");
         long number = ((Number) value).longValue();
         if (number < Integer.MIN_VALUE || number > Integer.MAX_VALUE || ((Number) value).doubleValue() != number)
@@ -320,7 +352,7 @@ public final class AndroidPlatformServices {
         return (int) number;
     }
 
-    private static List<?> list(Object value) {
+    static List<?> list(Object value) {
         if (value instanceof List) return (List<?>) value;
         if (value instanceof JSONArray) {
             List<Object> result = new ArrayList<>();
@@ -331,7 +363,7 @@ public final class AndroidPlatformServices {
         throw new IllegalArgumentException("Expected list");
     }
 
-    private static Map<String, Object> map(Object value) {
+    static Map<String, Object> map(Object value) {
         Map<String, Object> result = new LinkedHashMap<>();
         if (value == null) return result;
         if (value instanceof JSONObject) {

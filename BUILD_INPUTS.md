@@ -47,6 +47,12 @@ mipush/MiPush_SDK_Client_6_0_1-C.jar
 
 `runtime/lib` may include the old `libweatherhost.so` and `libweathercompat.so` as baseline evidence; both are always replaced with newly compiled outputs. It may also include normal `libapp.so`; the selected edition AOT always overrides it. The current normal APK contains 167 native libraries; no dependency reduction is performed.
 
+The verified `libhyper_opengl.so` input is patched during packaging by
+`port/patch_mgl_rendering.py`: three fingerprint-checked AArch64 instructions
+force native resolution and remove the renderer's additional software frame
+gate. The source input remains unchanged. Both editions package the same
+patched library; executable-page reloads retain these changes.
+
 `manifest.json` verifies every actual input file. Additional metadata fields are permitted:
 
 ```json

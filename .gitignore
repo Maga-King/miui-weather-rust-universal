@@ -13,3 +13,5 @@ __pycache__/
 dist-max/
 dist-dpi/
 dist-strip-checked/
+dist-resume-test/
+dist-temperature-test/
