@@ -337,7 +337,10 @@ def build_edition(edition: str, tc: dict[str, Path], inputs: Path,
                     name = path.relative_to(directory).as_posix()
                     if edition == "normal" and name.startswith("test-city/"):
                         continue
-                    entries["assets/" + name] = path.read_bytes()
+                    data = path.read_bytes()
+                    if name == "oxygen_widget/source_manifest.json":
+                        data = data.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+                    entries["assets/" + name] = data
     # Text fonts can fall back to Android without unregistering icon/symbol faces.
     font_manifest=json.loads(entries["assets/flutter_assets/FontManifest.json"])
     system_fonts=[family for family in font_manifest if family["family"].startswith("packages/hyperos/")]
