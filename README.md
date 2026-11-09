@@ -5,6 +5,7 @@
 保留原版天气界面、天气背景动画、MiSans 字体、图标和预报资源；使用应用内兼容层衔接标准 Android 权限、定位、后台任务与通知。这里的「RUST 版本」指原版 HyperOS 天气发行版本，并非把整个天气应用重写为 Rust。
 
 ## 下载
+ColorOS街道定位版本不敢传 侵权OPPO 要的私聊我酷安
 
 到 [Releases](https://github.com/Maga-King/miui-weather-rust-universal/releases) 下载：
 
