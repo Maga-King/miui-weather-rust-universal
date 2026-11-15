@@ -40,7 +40,7 @@ jobs:
         run: |
           python -X utf8 tests/test_background_permissions.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -X utf8 tests/test_permission_settings_intents.py
+          python -X utf8 tests/test_permission_settings_intents.py --android-jar "$env:ANDROID_HOME/platforms/android-36/android.jar"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -X utf8 tests/test_android_location.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
