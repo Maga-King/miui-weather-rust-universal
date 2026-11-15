@@ -26,7 +26,7 @@ def main():
     android = args.sdk / "platforms/android-36/android.jar"
     adb = [str(args.sdk / "platform-tools/adb.exe"), "-s", args.serial]
     sources = [ROOT / p for p in ("tests/OxygenWidgetRenderProbe.java", "port/WeatherOxygenWidgetRenderer.java",
-                                  "port/WeatherWidgetFonts.java", "port/WeatherWidgetData.java")]
+                                  "port/WeatherWidgetFonts.java", "port/WeatherWidgetData.java", "port/WeatherOxygenBackground.java", "port/WeatherWidgetGeometry.java")]
     def run(command, **kwargs):
         return subprocess.run([str(x) for x in command], check=True, **kwargs)
     run([java / "javac.exe", "--release", "8", "-encoding", "UTF-8", "-classpath", android,

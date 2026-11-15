@@ -1,26 +1,25 @@
 # 天气播报兼容实现
 
-原版主界面的大温度点击通过 `weather_method_channel` 调用 `tts_init`、
-`tts_start_speak` 和 `tts_stop_speak`。开始请求的正文是
-`tts_speak_text`，由原版天气页面按当前城市生成。
-原先兼容宿主没有实现这三个方法，调用返回未实现，因而没有声音。
+原版大温度数字通过 `weather_method_channel` 调用 `tts_init`、`tts_start_speak` 和 `tts_stop_speak`。桥接到标准 Android `TextToSpeech`，保留原版当前城市正文、回调和音频焦点。无需 Root、小米语音系统服务或录音权限。取消、切后台和销毁会停止播报；旧回调不能结束后续新播报。
 
-`AndroidWeatherSpeech` 现在将这些请求接到 Android `TextToSpeech`，
-并经 `weather_tts_channel` 回传原版认识的 `on_start`、`on_done`、
-`on_error`。回调沿用请求的 JSON／StandardMethodCodec，初始化完成前不返回成功。
+## 当前可选本地语音
 
-- 使用设备的标准 TTS 引擎；中文播报需要引擎支持中文语音数据。
-- 不需要 Root、小米语音系统服务或录音权限；不会采集麦克风音频。
-- 两版 Manifest 都声明 TTS 服务查询，以满足 Android 11 起的包可见性要求。
-- 直接使用原版传入的播报正文，不拼接组件缓存、不替换当前城市。
-- 开始播放由实际引擎回调确认；无引擎、缺语音、超时、音频焦点被拒绝等情况明确返回错误。
-- 取消、切后台和销毁会停止播报；切后台释放语音服务。
-- 旧的语音完成／音频焦点回调不能结束后续新播报。
+系统 TTS 是默认选项。设置中的“天气播报”可切换到 Kokoro 中文模型，或导入专门准备的缇宝 GPT-SoVITS V2ProPlus Android ZIP，保留预设 13、19、20。模型不嵌入 APK，未导入时不假报可用。
 
-本地回归：`python tests/test_weather_speech.py`，需要 `JAVA_HOME` 指向 JDK。
-测试编译原始生产桥接代码，用确定性的 Android 替身验证异步初始化、取消、
-超时、重试、语言缺失、音频焦点及两种回调编码。它不代替实机发声验收。
+Kokoro 使用官方 [int8 中文多语言包](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-multi-lang-v1_1.tar.bz2)，精确大小 147,052,523 字节，SHA-256 `259c9c8bc906d6078e4e0570421885dabb68b539c2f970fcbb890a58eeaf3e9c`。缇宝只提供标准 Android 文件选择器导入，原始 PyTorch 包不能直接使用。角色权重、转换后的参考张量及私人参考音频不随公开 Release 提供。
 
-2026-10-21：已检测到连接手机提供 `com.oplus.ttsaccessibilityengine`。
-无安装的 shell 合成探针被系统终止，不能据此判断 TTS 成败；本次尚未覆盖安装
-天气应用，因此真实点击后的播报与界面状态仍待安装验收。
+导入采用哈希清单、条目和体积限制、临时目录及原子提交。模型保存在应用私有 no-backup 目录；合成时才在独立 `:weather_speech` 进程加载。查询声音不加载大模型；取消和闲置后释放资源。
+
+## 延迟限制
+
+缇宝已在备用 Android 手机上导入并实际发声，用户反馈首次试听约等 50 秒。当前会加载模型并生成完整首句后再开始播放，本地首段超时为 90 秒。这不是实时流式播报，切换或释放模型后仍可能再次长时间等待；本次发布暂不继续性能优化。模型体积约 1.17 GB，另外存储。
+
+当前中文前端保留原始 g2pM、分词及实际 RoBERTa 特征；28 个天气、城市、单位案例的音素／token 与原实现一致，一组 `[61,1024]` float16 BERT 特征最大绝对差为 0。该结果不表示音质或所有手机的性能已验收。
+
+## 回归与打包
+
+- `tests/test_weather_speech.py`：132 项断言，覆盖三种后端、回调、90 秒超时、取消及音频焦点。
+- `tests/test_neural_speech.py`：96 项安装器和服务断言，采用确定性合成替身，不代表实机合成速度。
+- `tests/test_neural_kotlin_isolation.py`：Kotlin 命名隔离、JNI 类型化回调和可重复 jar。
+
+原天气网页 DEX 的 Kotlin ABI 经 R8 改写，新语音依赖隔离到 `dev.weather.speech.kotlin`，Sherpa JNI 类名保持不变。直接 ONNX Runtime 固定 1.22.0，Sherpa 固定 2.0.1，构建时校验下载哈希。许可证与数据来源见 [第三方声明](THIRD_PARTY_NOTICES.md)；相关声明同时写入 APK。

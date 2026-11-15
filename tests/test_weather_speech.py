@@ -15,6 +15,7 @@ SOURCES = {
 public class Context {
  public final android.media.AudioManager audio = new android.media.AudioManager();
  public Context getApplicationContext(){return this;}
+ public String getPackageName(){return "dev.weather.oneplus.test";}
  public <T> T getSystemService(Class<T> t){return t.cast(audio);}
  public android.content.res.Resources getResources(){return new android.content.res.Resources();}
 }''',
@@ -26,7 +27,22 @@ public class Configuration { public android.os.LocaleList getLocales(){return ne
     'android/os/LocaleList.java': '''package android.os;
 public class LocaleList { public java.util.Locale get(int i){return java.util.Locale.US;} }''',
     'android/os/Looper.java': 'package android.os; public class Looper {public static Looper getMainLooper(){return new Looper();}}',
-    'android/os/Bundle.java': 'package android.os; public class Bundle {public void putInt(String k,int v){}}',
+    'android/os/Bundle.java': '''package android.os; public class Bundle {
+ public final java.util.Map<String,Integer> data=new java.util.HashMap<>();
+ public void putInt(String k,int v){data.put(k,v);}public int getInt(String k,int fallback){return data.getOrDefault(k,fallback);}}''',
+    'dev/weather/oneplus/WeatherNeuralSpeechModels.java': '''package dev.weather.oneplus;
+ public class WeatherNeuralSpeechModels {public static int chosen=3;
+ public static int voice(android.content.Context c){return chosen;}
+ public static int rate=100;public static int ratePercent(android.content.Context c){return rate;}}''',
+    'dev/weather/oneplus/WeatherSpeechPreferences.java': '''package dev.weather.oneplus;
+ public class WeatherSpeechPreferences {public static final int SYSTEM=0,KOKORO=1,TIBAO=2;
+ public static int selected=SYSTEM;public static boolean verified=true;
+ public static int backend(android.content.Context c){return selected;}
+ public static boolean local(android.content.Context c){return selected!=SYSTEM;}
+ public static boolean isPrivateEngine(android.speech.tts.TextToSpeech t){return verified;}}''',
+    'dev/weather/oneplus/WeatherTibaoModels.java': '''package dev.weather.oneplus;
+ public class WeatherTibaoModels {public static int selected=13;
+ public static int preset(android.content.Context c){return selected;}}''',
     'android/os/Handler.java': '''package android.os;
 import java.util.*;
 public class Handler {
@@ -82,13 +98,15 @@ public class TextToSpeech {
  public static class Engine {public static final String KEY_PARAM_STREAM="stream";}
  public final OnInitListener init;public UtteranceProgressListener progress;
  public int languageResult=0,speakResult=0,speaks,stops,shutdowns;
- public String text,id;public java.util.Locale language;
+ public String text,id,enginePackage;public float rate;public java.util.Locale language;public android.os.Bundle params;
  public TextToSpeech(android.content.Context c,OnInitListener l){if(throwOnCreate)throw new IllegalStateException();init=l;last=this;}
+ public TextToSpeech(android.content.Context c,OnInitListener l,String p){this(c,l);enginePackage=p;}
  public static int getMaxSpeechInputLength(){return 4000;}
  public int setAudioAttributes(android.media.AudioAttributes a){return 0;}
  public int setOnUtteranceProgressListener(UtteranceProgressListener p){progress=p;return 0;}
  public int setLanguage(java.util.Locale l){language=l;return languageResult;}
- public int speak(String t,int queue,android.os.Bundle params,String uid){text=t;id=uid;speaks++;return speakResult;}
+ public int setSpeechRate(float value){rate=value;return 0;}
+ public int speak(String t,int queue,android.os.Bundle params,String uid){text=t;id=uid;this.params=params;speaks++;return speakResult;}
  public int stop(){stops++;return 0;}public void shutdown(){shutdowns++;}
 }''',
     'org/json/JSONObject.java': r'''package org.json;
@@ -130,6 +148,9 @@ public final class SpeechTest {
   Reply start=f.start("今天晴，二十六摄氏度。");check(start.successes==1,"speech enqueued");
   check(engine.text.equals("今天晴，二十六摄氏度。"),"speak original selected-city text");
   check(engine.language.equals(Locale.SIMPLIFIED_CHINESE),"Chinese voice");
+  check(engine.enginePackage==null&&!engine.params.data.containsKey("weather_voice_sid")
+        &&!engine.params.data.containsKey("weather_tibao_preset"),"system route has no private voice parameters");
+  check(engine.rate==1f,"default rate remains normal");
   check(f.events.isEmpty(),"no fake playback start");String first=engine.id;
   engine.progress.onStart(first);Handler.flush();check(f.event(0).contains("on_start"),"actual playback starts UI");
   Handler.advance(16000);check(f.events.size()==1,"start callback cancels timeout");
@@ -181,6 +202,41 @@ public final class SpeechTest {
 
   f=new Fixture();start=f.start("   ");check(start.errors==1,"blank text rejected");
   check(!f.bridge.handle("other_channel","tts_init",null,true,new Reply()),"unrelated channels untouched");f.close();
+  WeatherSpeechPreferences.selected=WeatherSpeechPreferences.KOKORO;WeatherNeuralSpeechModels.chosen=53;
+  WeatherNeuralSpeechModels.rate=125;
+  f=new Fixture();f.ready();engine=TextToSpeech.last;f.start("今天晴");
+  check("dev.weather.oneplus.test".equals(engine.enginePackage),"local mode selects private engine package");
+  check(engine.params.getInt("weather_voice_sid",-1)==53,"local model voice SID forwarded exactly");
+  check(!engine.params.data.containsKey("weather_tibao_preset"),"Kokoro route excludes Tibao preset");
+  check(engine.rate==1.25f,"saved speech rate applied before narration");
+  Handler.advance(15001);check(f.events.isEmpty(),"local first synthesis allowed past system timeout");
+  Handler.advance(74998);check(f.events.isEmpty(),"Kokoro remains pending before 90 second deadline");
+  Handler.advance(1);check(f.event(f.events.size()-1).contains("on_error")&&engine.stops>=2,"Kokoro timeout stops synthesis at 90 seconds");
+  f.close();WeatherNeuralSpeechModels.rate=100;
+  WeatherSpeechPreferences.selected=WeatherSpeechPreferences.TIBAO;
+  for(int preset:new int[]{13,19,20}){
+   WeatherTibaoModels.selected=preset;f=new Fixture();f.ready();engine=TextToSpeech.last;f.start("今天上海晴。");
+   check("dev.weather.oneplus.test".equals(engine.enginePackage),"Tibao route selects private engine package");
+   check(engine.params.getInt("weather_tibao_preset",-1)==preset&&!engine.params.data.containsKey("weather_voice_sid"),"Tibao preset forwarded without Kokoro SID");
+   Handler.advance(89999);check(f.events.isEmpty(),"Tibao remains pending before 90 second deadline");
+   Handler.advance(1);check(f.event(f.events.size()-1).contains("on_error"),"Tibao timeout is bounded at 90 seconds");f.close();
+  }
+  f=new Fixture();f.ready();engine=TextToSpeech.last;f.start("今天晴。");first=engine.id;
+  engine.progress.onStart(first);Handler.flush();Handler.advance(90001);
+  check(f.events.size()==1&&f.event(0).contains("on_start"),"actual Tibao playback cancels synthesis timeout");
+  f.call("tts_stop_speak",null,true);int eventsAfterStop=f.events.size();
+  engine.progress.onStart(first);engine.progress.onDone(first);Handler.flush();
+  check(f.events.size()==eventsAfterStop&&f.event(eventsAfterStop-1).contains("on_done"),"Tibao stop ignores late callbacks");f.close();
+  for(int backend:new int[]{WeatherSpeechPreferences.KOKORO,WeatherSpeechPreferences.TIBAO}){
+   WeatherSpeechPreferences.selected=backend;f=new Fixture();pending=f.start("今天晴。");engine=TextToSpeech.last;
+   f.call("tts_stop_speak",null,true);engine.init.onInit(0);Handler.flush();
+   check(pending.errors==1&&engine.speaks==0,"private route stop cancels pending initialization");f.close();
+   WeatherSpeechPreferences.verified=false;
+   f=new Fixture();init=f.call("tts_init",null,true);engine=TextToSpeech.last;engine.init.onInit(0);Handler.flush();
+   check(init.errors==1&&init.successes==0&&engine.shutdowns==1,"fallback rejected when private voice contract missing");
+   f.close();WeatherSpeechPreferences.verified=true;
+  }
+  WeatherSpeechPreferences.selected=WeatherSpeechPreferences.SYSTEM;
   System.out.println("PASS: "+assertions+" assertions covering speech callbacks, cancellation, retries, audio focus and codecs");
  }
 }''',

@@ -70,6 +70,7 @@ public final class PermissionRegressionProbe extends Activity {
         save();
     }
     @Override protected void onResume(){super.onResume();if(permissions!=null)permissions.onResume();if(location!=null)location.onResume();save();}
+    @Override public void onWindowFocusChanged(boolean focused){super.onWindowFocusChanged(focused);if(permissions!=null)permissions.onWindowFocusChanged(focused);}
     @Override protected void onPause(){if(permissions!=null)permissions.onPause();if(location!=null)location.onPause();super.onPause();}
     @Override protected void onDestroy(){if(permissions!=null)permissions.onDestroy();if(location!=null)location.onDestroy();super.onDestroy();}
     @Override public void onRequestPermissionsResult(int code,String[] names,int[] grants){

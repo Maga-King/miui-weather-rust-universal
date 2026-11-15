@@ -22,7 +22,10 @@ public final class WeatherAlerts {
     private static final String STORE="weather_real_alerts_v1";
     private static int running;
     private WeatherAlerts() {}
-    private static SharedPreferences state(Context c){return c.getSharedPreferences(STORE,Context.MODE_PRIVATE);}
+    static SharedPreferences state(Context c){return state(c,WeatherSources.current(c));}
+    static SharedPreferences state(Context c,WeatherSourceSession session){
+        return c.getSharedPreferences(WeatherSources.scopedName(STORE,session),Context.MODE_PRIVATE);
+    }
     public static boolean dailyEnabled(Context c){return AndroidWeatherPreferences.readBoolean(c,
             "com.miui.weather2.warning_weather_day_and_night","warning_weather_day_and_night",false);}
     public static boolean alertEnabled(Context c){return AndroidWeatherPreferences.readBoolean(c,
@@ -31,31 +34,61 @@ public final class WeatherAlerts {
             "com.miui.weather2.information","abrupt_weather_warning_key",true);}
     /** Share WeatherRefresh's single automatic chain when reminders need real background data. */
     public static boolean needsBackgroundWeather(Context c){
-        return realSource(c)&&((dailyEnabled(c)&&!remote(c,"daily"))||(alertEnabled(c)&&!remote(c,"alert")));
+        return realSource(c)&&((dailyEnabled(c)&&!remote(c,"daily"))
+                ||(WeatherSources.current(c).xiaomi()&&alertEnabled(c)&&!remote(c,"alert")));
     }
 
     /** Set true only after verified remote subscription/delivery, never merely a connected SDK. */
     public static void setRemoteDelivery(Context c,String category,boolean active){
         if(!category.equals("daily")&&!category.equals("alert")&&!category.equals("abrupt"))throw new IllegalArgumentException("category");
-        state(c).edit().putBoolean("remote_"+category,active).apply();
+        WeatherSourceSession session=WeatherSources.current(c);
+        synchronized(WeatherSources.LOCK) {
+            // MiPush delivery verification belongs to Xiaomi; a delayed callback
+            // must not disable another source's local daily forecast.
+            if(!session.xiaomi()||!WeatherSources.isCurrent(c,session))return;
+            state(c,session).edit().putBoolean("remote_"+category,active).apply();
+        }
         onEnvironmentChanged(c);
     }
     private static boolean remote(Context c,String category){return state(c).getBoolean("remote_"+category,false);}
+    static boolean retryDue(Context c,long now) {
+        int hour=Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()).getHour();
+        return WeatherRefresh.networkAllowed(c)&&realSource(c)&&dailyEnabled(c)&&!remote(c,"daily")
+                &&((hour>=7&&hour<10)||(hour>=19&&hour<22));
+    }
     private static boolean realSource(Context c) {
-        try {return WeatherRefresh.source(c) instanceof XiaomiWeatherRefreshSource;}
+        try {
+            if(!WeatherSources.isCurrent(c,WeatherSources.current(c)))return false;
+            Object source=WeatherRefresh.source(c);
+            return source instanceof XiaomiWeatherRefreshSource;
+        }
         catch(Exception ignored){return false;}
     }
     private static boolean selected(Context c,WeatherDatabaseBridge.City city){
-        return city!=null&&city.valid()&&city.sameSelection(WeatherDatabaseBridge.firstCity(c));
+        return selected(c,city,WeatherSources.current(c));
+    }
+    private static boolean selected(Context c,WeatherDatabaseBridge.City city,WeatherSourceSession session){
+        return WeatherSources.isCurrent(c,session)&&city!=null&&city.valid()
+                &&city.sameSelection(WeatherDatabaseBridge.firstCity(c,session));
     }
     /** Root calls only after successful real HTTP and final selection/cancellation checks. */
     public static void onWeatherResponse(Context c,WeatherDatabaseBridge.City city,JSONObject response) {
+        WeatherSourceSession session=WeatherSources.current(c);
+        // Legacy callers supply Xiaomi raw data without request provenance.
+        if(session.xiaomi())onWeatherResponse(c,city,response,session);
+    }
+    static void onWeatherResponse(Context c,WeatherDatabaseBridge.City city,JSONObject response,
+            WeatherSourceSession session) {
         try {
-            if(!realSource(c)||!WeatherRefresh.networkAllowed(c)||!selected(c,city)||response==null)return;
+            synchronized(WeatherSources.LOCK) {
+            if(!realSource(c)||!WeatherRefresh.networkAllowed(c)||!selected(c,city,session)||response==null)return;
             // Persist the real response independently of widget state, including tomorrow and alerts.
-            state(c).edit().putString("snapshot_city",selection(city))
+            state(c,session).edit().putString("snapshot_city",selection(city))
+                    .putString("snapshot_source",session.sourceId)
+                    .putString("snapshot_identity",city.cacheIdentity())
                     .putString("snapshot",response.toString()).commit();
-            deliver(c,city,response,System.currentTimeMillis());
+            }
+            deliver(c,city,response,System.currentTimeMillis(),session);
             ensureScheduled(c,false);
         }catch(Exception error){Log.w("WeatherAlerts","Real response deferred: "+error.getClass().getSimpleName());}
     }
@@ -69,46 +102,75 @@ public final class WeatherAlerts {
     }
     /** Executes off the main thread. Missing/stale real data produces no notification. */
     public static void runDue(Context c) {
+        WeatherSourceSession session=WeatherSources.current(c);
         try {
-            if(Thread.currentThread().isInterrupted()||!realSource(c)||!WeatherRefresh.networkAllowed(c))return;
-            WeatherDatabaseBridge.City city=WeatherDatabaseBridge.firstCity(c);
+            if(Thread.currentThread().isInterrupted()||!WeatherSources.isCurrent(c,session)
+                    ||!realSource(c)||!WeatherRefresh.networkAllowed(c))return;
+            WeatherDatabaseBridge.City city=WeatherDatabaseBridge.firstCity(c,session);
             if(city==null||!city.valid())return;
             JSONObject response=null;
-            if(selection(city).equals(state(c).getString("snapshot_city",""))) {
-                String raw=state(c).getString("snapshot",null);if(raw!=null)response=new JSONObject(raw);
+            SharedPreferences saved=state(c,session);
+            if(selection(city).equals(saved.getString("snapshot_city",""))
+                    &&session.sourceId.equals(saved.getString("snapshot_source",session.xiaomi()?"xiaomi":""))
+                    &&city.cacheIdentity().equals(saved.getString("snapshot_identity",city.cacheIdentity()))) {
+                String raw=saved.getString("snapshot",null);if(raw!=null)response=new JSONObject(raw);
             }
-            if(response==null && c.getDatabasePath("weather.db").isFile()) {
-                try(WeatherReadDatabase db=WeatherReadDatabase.open(c);
+            if(response==null && WeatherSources.database(c,session.sourceId).isFile()) {
+                try(WeatherReadDatabase db=WeatherReadDatabase.open(c,session);
                     Cursor row=db.rawQuery("SELECT data1 FROM raw WHERE city_id=? LIMIT 1",new String[]{city.id})) {
                     if(row.moveToFirst()&&!row.isNull(0))response=new JSONObject(row.getString(0));
                 }
             }
-            if(response!=null&&selected(c,city)&&!Thread.currentThread().isInterrupted())deliver(c,city,response,System.currentTimeMillis());
+            if(response!=null&&selected(c,city,session)&&!Thread.currentThread().isInterrupted())
+                deliver(c,city,response,System.currentTimeMillis(),session);
+            synchronized(WeatherSources.LOCK) {
+                if(WeatherSources.isCurrent(c,session))state(c,session).edit()
+                        .putLong("last_background_check_ms",System.currentTimeMillis()).apply();
+            }
         }catch(Exception e){Log.w("WeatherAlerts","Cached reminder deferred: "+e.getClass().getSimpleName());}
     }
-    private static void deliver(Context c,WeatherDatabaseBridge.City city,JSONObject response,long now) {
-        if(!selected(c,city)||Thread.currentThread().isInterrupted())return;
-        if(alertEnabled(c)&&!remote(c,"alert"))for(WeatherAlertData.Event e:WeatherAlertData.alerts(response,now))
-            post(c,"alert",city.id,e.identity(),e.title,e.text,e.when);
+    private static void deliver(Context c,WeatherDatabaseBridge.City city,JSONObject response,long now,
+            WeatherSourceSession session) {
+        if(!selected(c,city,session)||Thread.currentThread().isInterrupted())return;
+        // Current alternate adapters expose daily forecasts but no verified
+        // severe-warning feed. Never borrow Xiaomi warnings for them.
+        if(session.xiaomi()&&alertEnabled(c)&&!remote(c,"alert"))for(WeatherAlertData.Event e:WeatherAlertData.alerts(response,now))
+            post(c,"alert",city.id,e.identity(),e.title,e.text,e.when,session);
         if(!dailyEnabled(c)||remote(c,"daily"))return;
         ZonedDateTime local=Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault());int hour=local.getHour();
         // Android may defer a 7/19 job in Doze. Deliver only within that useful morning/evening window.
         boolean morning=hour>=7&&hour<10,evening=hour>=19&&hour<22;
         if(!morning&&!evening)return;
-        LocalDate target=morning?local.toLocalDate():local.toLocalDate().plusDays(1);
+        LocalDate providerDate=local.toLocalDate();
+        if(!session.xiaomi()) {
+            JSONObject metadata=response.optJSONObject("_weatherSource");
+            try {if(metadata!=null)providerDate=Instant.ofEpochMilli(now)
+                    .atZone(ZoneId.of(metadata.getString("zoneId"))).toLocalDate();}
+            catch(Exception invalid){return;}
+        }
+        LocalDate target=morning?providerDate:providerDate.plusDays(1);
         String text=WeatherAlertData.forecast(response,target,city.unit,city.locale,now);if(text==null)return;
         boolean zh=city.locale.startsWith("zh");
         String title=city.name+" · "+(morning?(zh?"今天天气":"Today's weather"):(zh?"明天天气":"Tomorrow's weather"));
-        post(c,"daily",city.id,local.toLocalDate()+"/"+(morning?"07":"19"),title,text,now);
+        post(c,"daily",city.id,local.toLocalDate()+"/"+(morning?"07":"19"),title,text,now,session);
+    }
+    /** Xiaomi-only legacy oracle/entry point; live work carries its captured session. */
+    private static void deliver(Context c,WeatherDatabaseBridge.City city,JSONObject response,long now) {
+        WeatherSourceSession session=WeatherSources.current(c);
+        if(session.xiaomi())deliver(c,city,response,now,session);
     }
     /** Shared alert identity makes HTTP discovery and MiPush receipt update one notification. */
     public static boolean postServerAlert(Context c,String cityId,JSONObject alert) {
+        WeatherSourceSession session=WeatherSources.current(c);
+        if(!session.xiaomi()||!WeatherSources.isCurrent(c,session))return false;
         WeatherAlertData.Event e=WeatherAlertData.alert(alert,System.currentTimeMillis());
-        return e!=null&&alertEnabled(c)&&post(c,"alert",cityId,e.identity(),e.title,e.text,e.when);
+        return e!=null&&alertEnabled(c)&&post(c,"alert",cityId,e.identity(),e.title,e.text,e.when,session);
     }
     /** Called for a real SDK pass-through callback; a notification click never re-posts it. */
     public static void onMiPushContent(Context c,String messageId,String content,boolean clicked) {
         if(clicked||content==null||content.length()>2*1024*1024)return;
+        WeatherSourceSession session=WeatherSources.current(c);
+        if(!session.xiaomi()||!WeatherSources.isCurrent(c,session))return;
         try {
             JSONObject envelope=new JSONObject(content);
             WeatherDatabaseBridge.City city=WeatherDatabaseBridge.firstCity(c);
@@ -141,22 +203,27 @@ public final class WeatherAlerts {
     /** For an actual structured server event. No locally inferred abnormal-weather thresholds. */
     public static boolean postServerEvent(Context c,String category,String cityId,String eventId,
             String title,String text,long publishedAtMs) {
+        WeatherSourceSession session=WeatherSources.current(c);
+        if(!session.xiaomi()||!WeatherSources.isCurrent(c,session))return false;
         if(!category.equals("abrupt")&&!category.equals("alert"))return false;
         if(category.equals("abrupt")?!abruptEnabled(c):!alertEnabled(c))return false;
         long now=System.currentTimeMillis();
         // Original abrupt messages do not always carry issue time. Zero means actual receipt time.
         if(publishedAtMs==0)publishedAtMs=now;
         if(eventId==null||eventId.trim().isEmpty()||publishedAtMs<=0||publishedAtMs>now+300_000||now-publishedAtMs>WeatherAlertData.DAY)return false;
-        return post(c,category,cityId,eventId,title,text,publishedAtMs);
+        return post(c,category,cityId,eventId,title,text,publishedAtMs,session);
     }
-    private static synchronized boolean post(Context c,String category,String cityId,String identity,String title,String text,long when) {
+    private static boolean post(Context c,String category,String cityId,String identity,String title,String text,long when,
+            WeatherSourceSession session) {
+        synchronized(WeatherSources.LOCK) {
         if(title==null||title.trim().isEmpty()||text==null||text.trim().isEmpty()||Thread.currentThread().isInterrupted())return false;
         try {
-            if(!realSource(c)||!WeatherRefresh.networkAllowed(c))return false;
-            WeatherDatabaseBridge.City current=WeatherDatabaseBridge.firstCity(c);
+            if(!WeatherSources.isCurrent(c,session)||!realSource(c)||!WeatherRefresh.networkAllowed(c))return false;
+            WeatherDatabaseBridge.City current=WeatherDatabaseBridge.firstCity(c,session);
             if(current==null||!current.valid()||!current.id.equals(cityId))return false;
-            String key="sent_"+hash(category+"\n"+cityId+"\n"+identity);
-            SharedPreferences prefs=state(c);if(prefs.contains(key))return true;
+            String key="sent_"+hash((session.xiaomi()?"":session.sourceId+"\n")
+                    +category+"\n"+cityId+"\n"+identity);
+            SharedPreferences prefs=state(c,session);if(prefs.contains(key))return true;
             int id=0x57000000|(key.hashCode()&0xffffff);
             AndroidWeatherNotifications.PostResult result=AndroidWeatherNotifications.postLocal(c,
                     new AndroidWeatherNotifications.Request(id,AndroidWeatherNotifications.DEFAULT_CHANNEL,title,text,when,null));
@@ -167,6 +234,7 @@ public final class WeatherAlerts {
                     &&entry.getValue() instanceof Long&&now-(Long)entry.getValue()>7*WeatherAlertData.DAY)edit.remove(entry.getKey());
             edit.putLong(key,now).commit();return true;
         }catch(Exception e){Log.w("WeatherAlerts","Notification deferred: "+e.getClass().getSimpleName());return false;}
+        }
     }
     private static String selection(WeatherDatabaseBridge.City city){return city.id+"\n"+city.locationKey+"\n"+city.latitude+"\n"+city.longitude+"\n"+city.located;}
     private static String hash(String value)throws Exception{
@@ -180,16 +248,19 @@ public final class WeatherAlerts {
             if(time>now)return time;
         }throw new IllegalStateException();
     }
-    private static synchronized void ensureScheduled(Context c,boolean replace) {
+    private static void ensureScheduled(Context c,boolean replace) {
+        synchronized(WeatherSources.LOCK) {
         JobScheduler jobs=c.getSystemService(JobScheduler.class);if(jobs==null)return;
         boolean enabled=WeatherRefresh.networkAllowed(c)&&realSource(c)&&dailyEnabled(c)&&!remote(c,"daily");
         for(int id:new int[]{JOB_A,JOB_B})if(id!=running && (!enabled||replace))jobs.cancel(id);
         if(!enabled)return;
         for(int id:new int[]{JOB_A,JOB_B})if(id!=running&&jobs.getPendingJob(id)!=null)return;
         int id=running==JOB_A?JOB_B:JOB_A;long now=System.currentTimeMillis();
-        jobs.schedule(new JobInfo.Builder(id,new ComponentName(c,WeatherAlertJobService.class))
+        int result=jobs.schedule(new JobInfo.Builder(id,new ComponentName(c,WeatherAlertJobService.class))
                 .setMinimumLatency(Math.max(1,nextBoundary(now,ZoneId.systemDefault())-now)).setPersisted(true).build());
+        if(result!=JobScheduler.RESULT_SUCCESS)Log.w("WeatherAlerts","Background reminder scheduling rejected");
+        }
     }
-    static synchronized void jobStarted(Context c,int id){running=id;ensureScheduled(c,false);}
-    static synchronized void jobEnded(int id){if(running==id)running=0;}
+    static void jobStarted(Context c,int id){synchronized(WeatherSources.LOCK){running=id;ensureScheduled(c,false);}}
+    static void jobEnded(int id){synchronized(WeatherSources.LOCK){if(running==id)running=0;}}
 }

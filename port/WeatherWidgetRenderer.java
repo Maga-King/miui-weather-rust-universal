@@ -21,6 +21,7 @@ import java.io.InputStream;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.Locale;
+import java.util.Random;
 import java.util.TimeZone;
 
 /** Static rendition of assets/maml_weather_2x2.mtz, using its original 150-unit layout. */
@@ -53,12 +54,17 @@ final class WeatherWidgetRenderer {
     }
 
     Bitmap render(WeatherWidgetData data, long now, int width, int height) {
+        return render(data,now,width,height,100,100);
+    }
+
+    Bitmap render(WeatherWidgetData data,long now,int width,int height,int widthPercent,int heightPercent) {
         // The provider budgets shared RemoteViews bitmap memory for the display.
         // Keep the host's pixel size instead of upscaling a 440 px fallback frame.
         width = Math.max(1, width);
         height = Math.max(1, height);
         Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(bitmap);
+        WeatherWidgetGeometry.apply(canvas,width,height,widthPercent,heightPercent);
         float scale = Math.min(width, height) / 150f;
         canvas.scale(scale, scale);
         float w = width / scale, h = height / scale, sy = h / 150f;
@@ -86,6 +92,7 @@ final class WeatherWidgetRenderer {
             : type >= 1 && type <= 3 ? 3
             : type >= 13 && type <= 17 || type == 22 || type == 25 ? 6 : 4;
         asset(canvas, "cloud/cloud" + cloud + ".png", 0, 0, 180, h);
+        drawPrecipitation(canvas, data, 0, w, h);
         boolean rain = data.hasRain(now);
         text.setTypeface(medium); text.setTextSize(14);
         float citySize = text.measureText(data.cityName) > 105 ? 12 : 14;
@@ -122,6 +129,77 @@ final class WeatherWidgetRenderer {
             : type >= 1 && type <= 3 ? 3
             : type >= 13 && type <= 17 || type == 22 || type == 25 ? 6 : 4;
         asset(canvas, "cloud/cloud" + cloud + ".png", 0, 0, width * 1.2f, height);
+    }
+
+    /** A stable frame of the original MAML lowerElement, below all card text.
+     * Particle art is selected by current weather, not the optional minute-rain chart.
+     * RemoteViews still updates at the existing cadence; this is not an animation loop.
+     */
+    void drawPrecipitation(Canvas canvas, WeatherWidgetData data, int style, float width, float height) {
+        if (data == null || width <= 0 || height <= 0) return;
+        boolean snow = data.weatherType >= 13 && data.weatherType <= 17;
+        int count = precipitationCount(style, data.weatherType, snow);
+        if (count == 0) return;
+        String path = "weather_widget/texture/" + (snow ? "snow.png" : "rain.png");
+        try (InputStream in = context.getAssets().open(path)) {
+            Bitmap texture = BitmapFactory.decodeStream(in);
+            if (texture == null) return;
+            int saved = canvas.save();
+            try {
+                canvas.clipRect(0, 0, width, height);
+                // Original narrow MAML canvas is 413px; wide cards use the
+                // 344:150 layout ratio. Keep particle size proportional on hosts.
+                float unit = width / ((style == 2 || style == 5 || style == 6) ? 413f * 344f / 150f : 413f);
+                int level = precipitationLevel(data.weatherType, snow);
+                float snowSize = level == 0 ? 8 : level == 1 ? 9 : 11;
+                // MAML seeds these once with rand(). A fixed seed gives a stable
+                // valid frame and prevents unrelated refreshes moving every drop.
+                Random random = new Random(snow ? 0x534e4f57L : 0x5241494eL);
+                paint.setShader(null);
+                for (int i = 0; i < count; i++) {
+                    float x = random.nextFloat() * width, y = random.nextFloat() * height;
+                    float scale = snow ? random.nextFloat() * 2f + .7f - i * .02f
+                                       : random.nextFloat() * 3f + .1f;
+                    float alpha = snow ? .3f + random.nextFloat() / 2f : .4f + random.nextFloat() / 4f;
+                    // Later snow entries in the original array can have a
+                    // non-positive size; they do not create visible flakes.
+                    if (scale <= 0) continue;
+                    float particleWidth = scale * unit * (snow ? snowSize : 1);
+                    float particleHeight = scale * unit * (snow ? snowSize : 12);
+                    paint.setAlpha(Math.round(alpha * 255));
+                    canvas.drawBitmap(texture, null, new RectF(x, y, x + particleWidth, y + particleHeight), paint);
+                }
+            } finally {
+                paint.setAlpha(255);
+                canvas.restoreToCount(saved);
+                texture.recycle();
+            }
+        } catch (Exception error) { Log.w("WeatherWidget", "Missing original precipitation " + path, error); }
+    }
+
+    static int precipitationLevel(int type, boolean snow) {
+        if (snow) {
+            if (type == 14 || type == 17) return 0;
+            if (type == 16) return 1;
+            if (type == 13 || type == 15) return 2;
+        } else {
+            if (type == 8 || type == 11 || type == 12 || type == 25) return 0;
+            if (type == 10) return 1;
+            if (type == 4 || type == 5 || type == 6 || type == 9 || type == 22) return 2;
+        }
+        return -1;
+    }
+
+    static int precipitationCount(int style, int type, boolean snow) {
+        // The strip, dual-city and sun templates have no rain/snow lowerElement.
+        if (style != 0 && style != 2 && style != 4 && style != 5 && style != 6) return 0;
+        // The original daily card additionally gates its parent group to 4..17.
+        if (style == 5 && (type < 4 || type > 17)) return 0;
+        int level = precipitationLevel(type, snow);
+        if (level < 0) return 0;
+        int count = snow ? (level == 0 ? 80 : level == 1 ? 150 : 300)
+                         : (level == 0 ? 40 : level == 1 ? 80 : 140);
+        return style == 2 || style == 5 || style == 6 ? count * 3 / 2 : count;
     }
 
     private void background(Canvas canvas, WeatherWidgetData data, int duration, float w, float h) {

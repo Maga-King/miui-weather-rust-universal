@@ -24,14 +24,27 @@
 #include "xdl.h"
 
 static int diagnostic_fd=-1;
+static _Atomic int verbose_logs;
+static pthread_mutex_t diagnostic_lock=PTHREAD_MUTEX_INITIALIZER;
+static size_t diagnostic_bytes;
+#define DIAGNOSTIC_LIMIT (2u*1024u*1024u)
 static void host_log(const char *format, ...) {
     char line[4096];va_list args;va_start(args,format);
     int n=vsnprintf(line,sizeof(line)-1,format,args);va_end(args);
     if(n<0)return;if(n>(int)sizeof(line)-2)n=sizeof(line)-2;
     __android_log_write(ANDROID_LOG_INFO,"WeatherHost",line);
-    if(diagnostic_fd>=0){line[n++]='\n';write(diagnostic_fd,line,n);}
+    // Native coarse records remain synchronous, but bounded. Verbose release logs
+    // no longer reach this path; a full file stops only the file sink, never logcat.
+    pthread_mutex_lock(&diagnostic_lock);
+    if(diagnostic_fd>=0){
+        line[n++]='\n';
+        if(diagnostic_bytes+(size_t)n<=DIAGNOSTIC_LIMIT){ssize_t written=write(diagnostic_fd,line,n);if(written>0)diagnostic_bytes+=(size_t)written;}
+        else{close(diagnostic_fd);diagnostic_fd=-1;}
+    }
+    pthread_mutex_unlock(&diagnostic_lock);
 }
 #define LOG(...) host_log(__VA_ARGS__)
+#define VLOG(...) do { if(atomic_load_explicit(&verbose_logs,memory_order_relaxed))host_log(__VA_ARGS__); } while(0)
 static uintptr_t engine_base;
 static AAsset *text_font_asset_open(AAssetManager *manager,const char *name,int mode) {
     // Flutter's Android asset provider prefixes manifest paths before opening
@@ -186,7 +199,7 @@ static unsigned __attribute__((used,noinline)) weight_fallback_style(unsigned st
     if(scale==1.f)return style;
     unsigned adjusted=adjusted_text_style(style,scale);
     static unsigned diagnostics;
-    if(diagnostics++<12)LOG("FONT fallback U+%04X weight=%u -> %u",character,style&0xffff,adjusted&0xffff);
+    if(diagnostics++<12)VLOG("FONT fallback U+%04X weight=%u -> %u",character,style&0xffff,adjusted&0xffff);
     return adjusted;
 }
 // C++ sk_sp<SkTypeface> has a nontrivial return ABI in x8, even though it holds
@@ -261,7 +274,7 @@ static TextFaces weighted_text_faces(void *collection,const TextFamilies *famili
         unsigned weight=adjusted_text_style((unsigned)style,scale)&0xffffu;
         style=(style&~UINT64_C(0xffff))|weight;
         static unsigned diagnostics;
-        if(diagnostics++<16)LOG("FONT text match weight=%u -> %u size=%.1f",base,weight,size);
+        if(diagnostics++<16)VLOG("FONT text match weight=%u -> %u size=%.1f",base,weight,size);
     }
     return find_text_faces_original(collection,families,style,variations,flags,size);
 }
@@ -284,6 +297,27 @@ static void *bind_text_hook(uintptr_t offset,const uint32_t prologue[4],void *ho
     __builtin___clear_cache((char *)entry,(char *)entry+16);
     if(mprotect((void *)first,page,PROT_READ|PROT_EXEC))return NULL;
     return trampoline;
+}
+// Preserve the original scroll-to-sigma curve; the preference only gates it.
+static void (*mgl_blur_original)(float);
+static _Atomic int home_blur_enabled=1;
+static _Atomic int home_blur_seen;
+static _Atomic float home_blur_offset;
+static void controlled_mgl_blur(float offset) {
+    atomic_store(&home_blur_offset,offset);
+    atomic_store(&home_blur_seen,1);
+    mgl_blur_original(atomic_load(&home_blur_enabled)?offset:0.f);
+}
+JNIEXPORT void JNICALL Java_dev_weather_oneplus_AndroidDeviceProfile_nativeHomeCardBlur(
+        JNIEnv *env,jclass type,jboolean enabled) {
+    (void)env;(void)type;
+    int previous=atomic_exchange(&home_blur_enabled,enabled?1:0);
+    if(previous==(enabled?1:0))return;
+    // Exported setBlurRadius queues its work onto the original renderer thread.
+    // Clear an existing sigma immediately, even if the page is stationary.
+    if(mgl_blur_original&&atomic_load(&home_blur_seen))
+        mgl_blur_original(enabled?atomic_load(&home_blur_offset):0.f);
+    LOG("MGL home background blur enabled=%d",enabled?1:0);
 }
 static int bind_text_weight(void) {
     const char *system=getenv("WEATHER_SYSTEM_FONT");text_mi_sans=!system||strcmp(system,"1");
@@ -366,7 +400,8 @@ JNIEXPORT void JNICALL Java_dev_weather_oneplus_MajesticSurface_nativeGlassBackd
     ((void (*)(void *,int64_t,GlassSurfaceTexture))api[0x1b0/8])(holder,0,(GlassSurfaceTexture){frame,glass_frame_callbacks});
     ((void (*)(void *,int64_t,uint8_t))api[0x1b8/8])(holder,0,1);
     static unsigned count;
-    if(++count==1||count%300==0)LOG("GLASS supplied original weather backdrop %ux%u frame=%u",info.width,info.height,count);
+    if(++count==1)LOG("GLASS supplied original weather backdrop %ux%u frame=%u",info.width,info.height,count);
+    else if(count%300==0)VLOG("GLASS supplied original weather backdrop %ux%u frame=%u",info.width,info.height,count);
 }
 // Engine callbacks can run concurrently with Activity replacement. A local JNI
 // reference keeps the callback target alive after the lock is released.
@@ -705,6 +740,11 @@ static int bind_mgl_surfaces(void *library) {
         LOG("MGL unsupported surface provider ABI");return 0;
     }
     if(!configure_mgl_rendering(library,(uintptr_t)native.dli_fbase))return 0;
+    uintptr_t saved_engine=engine_base;engine_base=(uintptr_t)native.dli_fbase;
+    static const uint32_t blur_guard[]={0xfc1e0fe8,0xa9017bfd,0x910043fd,0xd503201f};
+    if(!mgl_blur_original)mgl_blur_original=bind_text_hook(0xbb0c0,blur_guard,(void*)controlled_mgl_blur);
+    engine_base=saved_engine;
+    if(!mgl_blur_original){LOG("MGL home blur control ABI unavailable");return 0;}
     bind_startup_frame_observer(library,(uintptr_t)native.dli_fbase);
     const struct {size_t offset;uintptr_t implementation;} providers[]={
         {0x146850,(uintptr_t)mgl_create_image_reader},
@@ -769,11 +809,11 @@ done:
     pthread_mutex_unlock(&mgl_lock);
 }
 static uintptr_t unused_callback(void) { return 0; }
-static void batch_create(void *context) { LOG("COMPOSE batch create context=%p tid=%d",context,gettid()); }
-static void batch_begin(void *context,int64_t view) { LOG("COMPOSE batch begin context=%p view=%lld tid=%d",context,(long long)view,gettid()); }
-static void batch_apply(void *context) { LOG("COMPOSE batch apply context=%p tid=%d",context,gettid()); }
+static void batch_create(void *context) { VLOG("COMPOSE batch create context=%p tid=%d",context,gettid()); }
+static void batch_begin(void *context,int64_t view) { VLOG("COMPOSE batch begin context=%p view=%lld tid=%d",context,(long long)view,gettid()); }
+static void batch_apply(void *context) { VLOG("COMPOSE batch apply context=%p tid=%d",context,gettid()); }
 static void blur_light(void *context,int64_t view,const float (*values)[27],int count,const int *ids,const int (*ranges)[2]) {
-    LOG("COMPOSE blur context=%p view=%lld values=%p count=%d ids=%p ranges=%p",context,(long long)view,values,count,ids,ranges);
+    VLOG("COMPOSE blur context=%p view=%lld values=%p count=%d ids=%p ranges=%p",context,(long long)view,values,count,ids,ranges);
 }
 static void window_first_frame(void *context,int64_t view) { LOG("COMPOSE first frame context=%p view=%lld",context,(long long)view); }
 static void *asset_manager_handle(void *context) { return context; }
@@ -825,6 +865,8 @@ static void dispatch(const char *channel, const void *data, size_t length) {
 }
 JNIEXPORT jstring JNICALL Java_dev_weather_oneplus_WeatherActivity_startEngine(JNIEnv *env, jobject self,
         jstring libraries, jstring extra, jstring data_dir, jobject assets, jstring backend) {
+    const char *verbose=getenv("WEATHER_VERBOSE_LOGS");
+    atomic_store_explicit(&verbose_logs,verbose&&!strcmp(verbose,"1"),memory_order_relaxed);
     if(!bind_activity(env,self))return NULL; // Preserve the pending JNI exception.
     if (holder) {
         LOG("Rebound existing engine to current Activity");
@@ -835,7 +877,11 @@ JNIEXPORT jstring JNICALL Java_dev_weather_oneplus_WeatherActivity_startEngine(J
     const char *data = (*env)->GetStringUTFChars(env, data_dir, NULL);
     const char *requested_backend = backend ? (*env)->GetStringUTFChars(env, backend, NULL) : NULL;
     char diagnostic_path[4096];snprintf(diagnostic_path,sizeof(diagnostic_path),"%s/native-host.log",data);
+    pthread_mutex_lock(&diagnostic_lock);
+    if(diagnostic_fd>=0)close(diagnostic_fd);
+    diagnostic_bytes=0;
     diagnostic_fd=open(diagnostic_path,O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC,0600);
+    pthread_mutex_unlock(&diagnostic_lock);
     char paths[8192], error[4096] = {0};
     snprintf(paths, sizeof(paths), "%s:%s", lib, more);
     void *linker = xdl_open("linker64", XDL_DEFAULT);
@@ -976,6 +1022,6 @@ JNIEXPORT void JNICALL Java_dev_weather_oneplus_WeatherActivity_nativeInsets(JNI
     viewport[15]=touch_slop;
     if(holder&&viewport[1]>0&&viewport[2]>0)
         ((void (*)(void*,void*))api[0xa0/8])(holder,viewport);
-    LOG("Insets left=%d top=%d right=%d bottom=%d ime=%d gestures=[%d,%d,%d,%d] slop=%g",
+    VLOG("Insets left=%d top=%d right=%d bottom=%d ime=%d gestures=[%d,%d,%d,%d] slop=%g",
         left,top,right,bottom,ime_bottom,gesture_left,gesture_top,gesture_right,gesture_bottom,touch_slop);
 }

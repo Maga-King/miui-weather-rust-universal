@@ -43,12 +43,17 @@ final class WeatherCardWidgetRenderer {
     }
 
     Bitmap render(int style,WeatherWidgetData data,JSONObject details,long time,int width,int height) {
+        return render(style,data,details,time,width,height,100,100);
+    }
+
+    Bitmap render(int style,WeatherWidgetData data,JSONObject details,long time,int width,int height,int widthPercent,int heightPercent) {
         selected=data;now=time;
         if(details==null)details=new JSONObject();
         float w=style==DUAL?344:(style==HOURLY||style==DAILY||style==COMPLETE)?340:150;
         float h=style==SMALL?58:style==DUAL?60:style==COMPLETE?340:150;
         Bitmap result=Bitmap.createBitmap(Math.max(1,width),Math.max(1,height),Bitmap.Config.ARGB_8888);
         Canvas canvas=new Canvas(result);
+        WeatherWidgetGeometry.apply(canvas,result.getWidth(),result.getHeight(),widthPercent,heightPercent);
         // A standard launcher's one-row cell is taller than the original MAML
         // strip. Keep the template's aspect ratio inside it instead of turning
         // the whole allocated cell into an oversized card.
@@ -63,6 +68,7 @@ final class WeatherCardWidgetRenderer {
         if(style==DUAL)dual(canvas,data,details,w);
         else {
             sky.drawSky(canvas,data,time,w,h);
+            sky.drawPrecipitation(canvas,data,style,w,h);
             if(style==SUN)sun(canvas,data);
             else if(style==SMALL)small(canvas,data,details,w);
             else if(style==CUSTOM)custom(canvas,data,details);

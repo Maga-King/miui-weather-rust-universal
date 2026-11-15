@@ -6,7 +6,7 @@ can be callbacks, labels or methods that are never invoked on this build.
 ## Implemented in the channel-audit APKs
 
 - Legacy and OS4 typhoon, rainfall and AQI Activity dispatch, original resources,
-  city JSON transport and mode extras. Typhoon opened twice on device bf69d9b2
+  city JSON transport and mode extras. Typhoon opened twice on device [local test device]
   (Android 17 / OS4); screenshot and logs are under `.build/channel-audit/`.
 - Typed package queries, launch-intent serialization, standard Activity launches
   and Activity results; standard location/app/notification settings routing.

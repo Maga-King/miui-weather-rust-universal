@@ -26,6 +26,7 @@ final class WeatherOxygenWidgetRenderer {
     private static final String ASSETS = "oxygen_widget/";
     private static final int DAWN=0, MORNING=1, NOON=2, AFTERNOON=3, DUSK=4, NIGHT=5;
     private final Context context;
+    private final WeatherOxygenBackground sky;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final TextPaint text = new TextPaint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
     private final Typeface medium;
@@ -33,24 +34,30 @@ final class WeatherOxygenWidgetRenderer {
 
     WeatherOxygenWidgetRenderer(Context context) {
         this.context = context.getApplicationContext();
+        sky = new WeatherOxygenBackground(this.context);
         medium = WeatherWidgetFonts.face(this.context, 380, 500);
         semibold = WeatherWidgetFonts.face(this.context, 450, 600);
     }
 
     Bitmap render(int style, WeatherWidgetData data, JSONObject details, long time, int width, int height) {
+        return render(style,data,details,time,width,height,100,100);
+    }
+
+    Bitmap render(int style,WeatherWidgetData data,JSONObject details,long time,int width,int height,int widthPercent,int heightPercent) {
         // A batch reuses this renderer for several instances/responsive sizes.
         // Arc strokes and translucent separators must not tint the next background.
         paint.reset();
         paint.setFlags(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
         text.reset();
         text.setFlags(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
-        if (style == 8) return renderOrdinary(data, details, time, width, height);
-        return renderTemplate(style, data, details, time, width, height);
+        if (style == 8) return renderOrdinary(data, details, time, width, height,widthPercent,heightPercent);
+        return renderTemplate(style, data, details, time, width, height,widthPercent,heightPercent);
     }
 
-    private Bitmap renderOrdinary(WeatherWidgetData data, JSONObject details, long time, int width, int height) {
+    private Bitmap renderOrdinary(WeatherWidgetData data, JSONObject details, long time, int width, int height,int widthPercent,int heightPercent) {
         Bitmap out = Bitmap.createBitmap(Math.max(1,width), Math.max(1,height), Bitmap.Config.ARGB_8888);
         Canvas c = new Canvas(out);
+        WeatherWidgetGeometry.apply(c,out.getWidth(),out.getHeight(),widthPercent,heightPercent);
         c.save();
         // Fit only the sky to the host bounds. Keep glyphs/circles proportional
         // when a launcher's 2x2 cell is not square. Bottom content stays anchored.
@@ -62,7 +69,7 @@ final class WeatherOxygenWidgetRenderer {
         c.clipPath(shape);
         int phase = phase(data,time);
         boolean night = phase == NIGHT;
-        drawBackground(c,data,phase,w,h);
+        drawBackground(c,data,details,time,8,w,h);
         marker(c,24,22);
         label(c,data==null?"--":data.cityName,34,26,12,w-50,medium);
         String temperature = data==null?"--":data.temperature;
@@ -88,9 +95,10 @@ final class WeatherOxygenWidgetRenderer {
     }
 
     private Bitmap renderTemplate(int style, WeatherWidgetData data, JSONObject details, long time,
-            int width, int height) {
+                                  int width, int height,int widthPercent,int heightPercent) {
         Bitmap out = Bitmap.createBitmap(Math.max(1,width), Math.max(1,height), Bitmap.Config.ARGB_8888);
         Canvas c = new Canvas(out);
+        WeatherWidgetGeometry.apply(c,out.getWidth(),out.getHeight(),widthPercent,heightPercent);
         if (details == null) details = new JSONObject();
         boolean expandedStrip = style == 16 && width > height * 1.35f;
         float baseW, baseH;
@@ -122,9 +130,9 @@ final class WeatherOxygenWidgetRenderer {
         JSONArray hourly=details.optJSONArray("hourly"), daily=details.optJSONArray("daily");
 
         switch(style) {
-            case 9: quickSmallSky(c,data,time,baseW,baseH); break;
-            case 10: quickMiddle(c,data,time,hourly,baseW,baseH); break;
-            case 11: quickBig(c,data,time,hourly,daily,baseW,baseH); break;
+            case 9: quickSmallSky(c,data,details,time,baseW,baseH); break;
+            case 10: quickMiddle(c,data,details,time,hourly,baseW,baseH); break;
+            case 11: quickBig(c,data,details,time,hourly,daily,baseW,baseH); break;
             case 12: dragonfly(c,data,details,time,hourly,baseW,baseH); break;
             case 13: seedlingStrip(c,data,time,baseW,baseH,false); break;
             case 14: seedlingSquare(c,data,time,details,baseW,baseH,false); break;
@@ -141,15 +149,15 @@ final class WeatherOxygenWidgetRenderer {
             case 22: rpkStrip(c,data,time,baseW,baseH); break;
             case 23: rpkToday(c,data,details,time,hourly,daily,baseW,baseH); break;
             case 24: quickSmallOos(c,data,time,baseW,baseH); break;
-            default: drawBackground(c,data,phase,baseW,baseH); break;
+            default: drawBackground(c,data,details,time,style,baseW,baseH); break;
         }
         c.restore();
         return out;
     }
 
-    private void quickSmallSky(Canvas c,WeatherWidgetData data,long time,float w,float h) {
+    private void quickSmallSky(Canvas c,WeatherWidgetData data,JSONObject details,long time,float w,float h) {
         int period=phase(data,time);boolean night=period==NIGHT;
-        drawBackground(c,data,period,w,h);
+        drawBackground(c,data,details,time,9,w,h);
         label(c,data==null?"--":data.cityName,16,35,14,w-62,medium);
         String temperature=data==null?"--":missing(data.temperature);
         text.setTypeface(semibold);text.setTextSize(40);
@@ -213,8 +221,8 @@ final class WeatherOxygenWidgetRenderer {
         glyph.setBounds(0,0,width,height);glyph.draw(c);c.restore();
     }
 
-    private void quickMiddle(Canvas c,WeatherWidgetData data,long time,JSONArray hourly,float w,float h) {
-        drawBackground(c,data,phase(data,time),w,h);
+    private void quickMiddle(Canvas c,WeatherWidgetData data,JSONObject details,long time,JSONArray hourly,float w,float h) {
+        drawBackground(c,data,details,time,10,w,h);
         marker(c,25,23);label(c,data==null?"--":data.cityName,36,27,12,110,medium);
         label(c,temp(data),16,83,43,118,semibold);
         String art=icon(data==null?-1:data.weatherType,phase(data,time)==NIGHT);
@@ -232,8 +240,8 @@ final class WeatherOxygenWidgetRenderer {
         }
     }
 
-    private void quickBig(Canvas c,WeatherWidgetData data,long time,JSONArray hourly,JSONArray daily,float w,float h) {
-        drawBackground(c,data,phase(data,time),w,h);
+    private void quickBig(Canvas c,WeatherWidgetData data,JSONObject details,long time,JSONArray hourly,JSONArray daily,float w,float h) {
+        drawBackground(c,data,details,time,11,w,h);
         marker(c,24,23);label(c,data==null?"--":data.cityName,35,27,13,w-92,medium);
         label(c,temp(data),17,91,48,150,semibold);
         String art=icon(data==null?-1:data.weatherType,phase(data,time)==NIGHT);
@@ -260,7 +268,7 @@ final class WeatherOxygenWidgetRenderer {
     }
 
     private void dragonfly(Canvas c,WeatherWidgetData data,JSONObject details,long time,JSONArray hourly,float w,float h) {
-        drawBackground(c,data,phase(data,time),w,h);
+        drawBackground(c,data,details,time,12,w,h);
         marker(c,25,25);label(c,data==null?"--":data.cityName,37,29,14,w-90,medium);
         String current=icon(data==null?-1:data.weatherType,phase(data,time)==NIGHT);
         if(current!=null)drawAsset(c,"icons/"+current,w-65,54,42,42);
@@ -309,7 +317,7 @@ final class WeatherOxygenWidgetRenderer {
 
     private void seedlingSquare(Canvas c,WeatherWidgetData data,long time,JSONObject details,float w,float h,boolean expanded) {
         if(expanded)panel(c,w,h,0xff2e5065,0xff457e98);
-        else drawBackground(c,data,phase(data,time),w,h);
+        else drawBackground(c,data,details,time,14,w,h);
         marker(c,22,22);label(c,data==null?"--":data.cityName,32,26,11,w-85,medium);
         String art=icon(data==null?-1:data.weatherType,phase(data,time)==NIGHT);
         if(art!=null)drawAsset(c,"icons/"+art,w-48,12,28,28);
@@ -365,7 +373,7 @@ final class WeatherOxygenWidgetRenderer {
     }
 
     private void rpkToday(Canvas c,WeatherWidgetData data,JSONObject details,long time,JSONArray hourly,JSONArray daily,float w,float h) {
-        drawBackground(c,data,phase(data,time),w,h);
+        drawBackground(c,data,details,time,23,w,h);
         label(c,data==null?"--":data.cityName,15,21,11,w-65,medium);
         String art=icon(data==null?-1:data.weatherType,phase(data,time)==NIGHT);
         if(art!=null)drawAsset(c,"icons/"+art,w-42,10,27,27);
@@ -439,79 +447,8 @@ final class WeatherOxygenWidgetRenderer {
         return phase(data,time)==NIGHT;
     }
 
-    private void drawBackground(Canvas c, WeatherWidgetData data, int phase,float w,float h) {
-        int type = data==null?-1:data.weatherType;
-        int[] colors;
-        if(type<0||type>25)colors=new int[]{0xff455466,0xff7e929f};
-        else if (phase==NIGHT) {
-            if (type>=4 && type<=12 || type==25) colors=new int[]{0xff152947,0xff456486};
-            else if (type>=13 && type<=17) colors=new int[]{0xff273653,0xff6686a0};
-            else colors=new int[]{0xff133765,0xff5e84b3};
-        } else if (type>=4 && type<=12 || type==25) {
-            colors=new int[]{0xff386598,0xff87a8c5};
-        } else if (type>=13 && type<=17) {
-            colors=new int[]{0xff5e89b2,0xffa9c6db};
-        } else if (type>=18 && type<=24) {
-            colors=new int[]{0xff997960,0xffd5ad86};
-        } else {
-            colors=new int[]{0xff3674c5,0xff8cc5f0};
-        }
-        paint.setColor(Color.WHITE);
-        paint.setShader(new LinearGradient(0,0,0,h,colors,null,Shader.TileMode.CLAMP));
-        c.drawRect(0,0,w,h,paint);
-        paint.setShader(null);
-        String background=background(type,phase);
-        if (background!=null) drawAsset(c,"backgrounds/"+background,0,0,w,h);
-    }
-
-    private static String background(int type,int phase) {
-        switch(type) {
-            case 0: return "weather_quick_card_sunday_"+sunPhase(phase)+"_small_16_bg.webp";
-            case 1: return "weather_quick_card_cloudy_"+cloudPhase(phase)+"_small_16_bg.webp";
-            case 2: return "weather_quick_card_overcast_"+overcastPhase(phase)+"_small_16_bg.webp";
-            case 3: return phase==NIGHT?"weather_quick_card_fog_night_small_16_bg.webp":"weather_quick_card_fog_noon_night_small_16_bg.webp";
-            case 4: case 5: case 6: case 9: return "weather_quick_card_heavy_rain_noon_small_16_bg.webp";
-            case 7: return "weather_quick_card_thunderstorm_noon_small_16_bg.webp";
-            case 8: return "weather_quick_card_thundershower_small_16_bg.webp";
-            case 10: return "weather_quick_card_middle_rain_noon_small_16_bg.webp";
-            case 11: return "weather_quick_card_rain_noon_small_16_bg.webp";
-            case 12: case 25: return "weather_quick_card_sleeting_small_16_bg.webp";
-            case 13: case 15: return "weather_quick_card_heavy_snow_noon_small_16_bg.webp";
-            case 14: case 17: return "weather_quick_card_light_snow_noon_small_16_bg.webp";
-            case 16: return "weather_quick_card_middle_snow_noon_small_16_bg.webp";
-            case 18: case 19: case 20: case 21: case 23: return "weather_quick_card_sand_dust_small_16_bg.webp";
-            case 22: return "weather_quick_card_hail_noon_small_16_bg.webp";
-            case 24: return phase==NIGHT?"weather_quick_card_smog_night_small_16_bg.webp":"weather_quick_card_smog_small_16_bg.webp";
-            default: return null;
-        }
-    }
-
-    private static String sunPhase(int phase) {
-        switch(phase) {
-            case DAWN:return "dawn";
-            case MORNING:return "morning";
-            case AFTERNOON:return "af";
-            case DUSK:return "nightfall";
-            case NIGHT:return "night";
-            default:return "noon";
-        }
-    }
-    private static String cloudPhase(int phase) {
-        switch(phase) {
-            case DAWN:case MORNING:return "morning";
-            case AFTERNOON:return "af";
-            case DUSK:return "nightfall";
-            case NIGHT:return "night";
-            default:return "noon";
-        }
-    }
-    private static String overcastPhase(int phase) {
-        switch(phase) {
-            case DAWN:case MORNING:return "morning";
-            case DUSK:return "nightfall";
-            case NIGHT:return "night";
-            default:return "noon";
-        }
+    private void drawBackground(Canvas c,WeatherWidgetData data,JSONObject details,long time,int style,float w,float h) {
+        sky.draw(c,data,details,time,style,w,h);
     }
 
     private static String icon(int type,boolean night) {

@@ -38,7 +38,7 @@ public class WeatherWidgetProvider extends AppWidgetProvider {
     @Override public void onDeleted(Context context, int[] ids) {
         for(int id:ids) {
             WeatherWidgetPreferences.delete(context,id);
-            synchronized(WeatherWidgetProvider.class){DRAWN.remove(id);}
+            synchronized(DRAWN){DRAWN.remove(id);}
         }
     }
     @Override public void onDisabled(Context context) {
@@ -65,7 +65,7 @@ public class WeatherWidgetProvider extends AppWidgetProvider {
             updateAll(context); WeatherRefresh.reschedule(context); WeatherRefresh.requestAutomatic(context);
         }
     }
-    public static synchronized void updateAll(Context context) {
+    public static void updateAll(Context context) {
         context=context.getApplicationContext();
         AppWidgetManager manager=AppWidgetManager.getInstance(context);
         WeatherWidgetExtendedData.Snapshot snapshot=null;
@@ -76,7 +76,7 @@ public class WeatherWidgetProvider extends AppWidgetProvider {
             update(context,manager,widgets,style,snapshot);
         }
     }
-    private static synchronized void update(Context context, AppWidgetManager manager, int[] ids,int style) {
+    private static void update(Context context, AppWidgetManager manager, int[] ids,int style) {
         if (ids.length == 0) return;
         context=context.getApplicationContext();
         update(context,manager,ids,style,readSnapshot(context));
@@ -114,8 +114,10 @@ public class WeatherWidgetProvider extends AppWidgetProvider {
             } catch(Exception error){Log.w("WeatherWidget","Cannot read extended weather cache",error);}
             Bundle options = manager.getAppWidgetOptions(id);
             List<WeatherWidgetSizing.Size> sizes=WeatherWidgetSizing.resolve(context,options,style);
-            String signature=signature(context,style,instance,details,sizes,now);
-            if(signature.equals(DRAWN.get(id)))continue;
+            int widthPercent=WeatherWidgetPreferences.widthPercent(context,id);
+            int heightPercent=WeatherWidgetPreferences.heightPercent(context,id);
+            String signature=signature(context,style,instance,details,sizes,now)+"|"+widthPercent+"|"+heightPercent;
+            synchronized(DRAWN){if(signature.equals(DRAWN.get(id)))continue;}
             if(style==0&&renderer==null)renderer=new WeatherWidgetRenderer(context);
             if(style!=0&&!WeatherWidgetCatalog.isOxygen(style)&&cards==null)cards=new WeatherCardWidgetRenderer(context);
             if(WeatherWidgetCatalog.isOxygen(style)&&oxygen==null)oxygen=new WeatherOxygenWidgetRenderer(context);
@@ -123,9 +125,9 @@ public class WeatherWidgetProvider extends AppWidgetProvider {
             List<Bitmap> rendered=new ArrayList<>();
             try {
                 for(WeatherWidgetSizing.Size size:sizes) {
-                    Bitmap bitmap=WeatherWidgetCatalog.isOxygen(style)?oxygen.render(style,instance,details,now,size.width,size.height)
-                        :style==0?renderer.render(instance,now,size.width,size.height)
-                        :cards.render(style,instance,details,now,size.width,size.height);
+                    Bitmap bitmap=WeatherWidgetCatalog.isOxygen(style)?oxygen.render(style,instance,details,now,size.width,size.height,widthPercent,heightPercent)
+                        :style==0?renderer.render(instance,now,size.width,size.height,widthPercent,heightPercent)
+                        :cards.render(style,instance,details,now,size.width,size.height,widthPercent,heightPercent);
                     rendered.add(bitmap);
                     RemoteViews views=new RemoteViews(context.getPackageName(),layout);
                     views.setImageViewBitmap(image,bitmap);views.setOnClickPendingIntent(image,open);
@@ -134,8 +136,11 @@ public class WeatherWidgetProvider extends AppWidgetProvider {
                 }
                 RemoteViews views=variants.values().iterator().next();
                 if(Build.VERSION.SDK_INT>=31&&variants.size()>1)views=new RemoteViews(variants);
-                manager.updateAppWidget(id,views);
-                DRAWN.put(id,signature);
+                synchronized(WeatherSources.LOCK){
+                    if(!snapshot.current())return;
+                    manager.updateAppWidget(id,views);
+                    synchronized(DRAWN){DRAWN.put(id,signature);}
+                }
             } finally {
                 // The synchronous Binder call has transferred ashmem copies to the
                 // widget service. No renderer or app-side cache retains these frames.

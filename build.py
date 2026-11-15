@@ -16,11 +16,13 @@ import shutil
 import subprocess
 import sys
 import urllib.request
+import ssl
 import zipfile
 from port.patch_dpi_settings import patch as patch_dpi_settings
 from port.patch_widget_settings import patch as patch_widget_settings
 from port.patch_weather_locale import patch as patch_weather_locale
 from port.patch_mgl_rendering import patch as patch_mgl_rendering
+from port.isolate_neural_kotlin import isolated_inputs as isolate_neural_kotlin
 
 ROOT = Path(__file__).resolve().parent
 WORK = ROOT / ".build"
@@ -34,6 +36,61 @@ EDITIONS = {
 MIPUSH_SHA256 = "bce8d29a119c0a85fd0e56e577ec291ddfb8edda1c0f901f3de467b7ca578644"
 WEBKIT_VERSION = "1.18.0"
 WEBKIT_SHA256 = "f15a0bd7d51f4bb8dffdd3a2cf5829f9a7de9ad4ba2682fa85d619032050581f"
+NEURAL_TTS_ARTIFACTS = {
+    "onnxruntime-android-1.22.0.aar": (
+        "https://repo.maven.apache.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/1.22.0/onnxruntime-android-1.22.0.aar",
+        "04a4617a9c797cf49225595e45b5546081cb34c86ac817581141577d3b7dbfe2"),
+    "sherpa-onnx-2.0.1.aar": (
+        "https://github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.1/sherpa-onnx-static-link-onnxruntime-2.0.1.aar",
+        "07e042d97f3a6bd5b7fe74d4eef0513dc01a714b16c15a903250095aba43a575"),
+    "kotlin-stdlib-2.2.0.jar": (
+        "https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-stdlib/2.2.0/kotlin-stdlib-2.2.0.jar",
+        "65d12d85a3b865c160db9147851712a64b10dadd68b22eea22a95bf8a8670dca"),
+    "commons-compress-1.21.jar": (
+        "https://repo.maven.apache.org/maven2/org/apache/commons/commons-compress/1.21/commons-compress-1.21.jar",
+        "6aecfd5459728a595601cfa07258d131972ffc39b492eb48bdd596577a2f244a"),
+}
+
+# Unfinished alternate-source research is retained locally, outside both APKs.
+WITHDRAWN_SOURCE_FILES = {
+    "WeatherSourceEngine.java", "WeatherSourceServer.java", "WeatherSourceSettingsActivity.java",
+    "WeatherSourceRefreshSource.java", "WeatherSourceXiaomiAdapter.java", "WeatherDataSourceSnapshot.java",
+    "WeatherSourceValues.java", "WeatherSourceHttp.java",
+    *{f"{name}Weather{kind}.java" for name in (
+        "OpenMeteo", "QWeather", "Caiyun", "Cma", "OpenWeather", "MetNorway") for kind in ("Source", "Parser")},
+}
+
+
+def neural_tts_dependencies() -> tuple[list[Path], Path]:
+    """Pinned CPU/ARM64 engine; models remain optional private downloads, outside the APK."""
+    directory = WORK / "dependencies"
+    directory.mkdir(parents=True, exist_ok=True)
+    for name, (url, expected) in NEURAL_TTS_ARTIFACTS.items():
+        artifact = directory / name
+        if artifact.is_file() and digest(artifact.read_bytes()) == expected:
+            continue
+        cached = WORK / "downloads" / name
+        if cached.is_file() and digest(cached.read_bytes()) == expected:
+            artifact.write_bytes(cached.read_bytes())
+            continue
+        # TLS 1.2 works with the release-asset CDN on this host; normal CA/hostname checks stay enabled.
+        tls = ssl.create_default_context()
+        tls.maximum_version = ssl.TLSVersion.TLSv1_2
+        with urllib.request.urlopen(url, timeout=60, context=tls) as response:
+            data = response.read()
+        if digest(data) != expected:
+            raise ValueError(f"Neural speech artifact SHA-256 mismatch: {name}")
+        artifact.write_bytes(data)
+    jar, library = directory / "sherpa-onnx-2.0.1.jar", directory / "libsherpa-onnx-jni.so"
+    with zipfile.ZipFile(directory / "sherpa-onnx-2.0.1.aar") as archive:
+        jar.write_bytes(archive.read("classes.jar"))
+        library.write_bytes(archive.read("jni/arm64-v8a/libsherpa-onnx-jni.so"))
+    ort_jar = directory / "onnxruntime-android-1.22.0.jar"
+    with zipfile.ZipFile(directory / "onnxruntime-android-1.22.0.aar") as archive:
+        ort_jar.write_bytes(archive.read("classes.jar"))
+        for name in ("libonnxruntime.so", "libonnxruntime4j_jni.so"):
+            (directory / name).write_bytes(archive.read("jni/arm64-v8a/" + name))
+    return [jar, directory / "kotlin-stdlib-2.2.0.jar", directory / "commons-compress-1.21.jar", ort_jar], library
 
 
 def webkit_jar() -> Path:
@@ -61,6 +118,13 @@ def digest(data: bytes) -> str:
 
 def run(*args: object) -> None:
     command = [str(arg) for arg in args]
+    # Large source/D8 lists must also work in long CI/worktree checkout paths.
+    # Java 17 reads quoted UTF-8 argument files without the Windows 32K limit.
+    if Path(command[0]).name.lower() in {"java.exe", "javac.exe"} and len(subprocess.list2cmdline(command)) > 24000:
+        response = WORK / "java-arguments.txt"
+        response.write_text("\n".join('"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+                                      for value in command[1:]) + "\n", encoding="utf-8")
+        command = [command[0], "@" + str(response)]
     print("+", subprocess.list2cmdline(command), flush=True)
     subprocess.run(command, check=True)
 
@@ -202,7 +266,7 @@ def compile_java(tc: dict[str, Path], inputs: Path) -> tuple[Path, Path, Path]:
     splash_jar = required(inputs / "splash/splash-runtime-isolated.jar")
     mipush = required(inputs / "mipush/MiPush_SDK_Client_6_0_1-C.jar")
     splash_sources = sorted((ROOT / "splash/src").rglob("*.java"))
-    host_sources = sorted((ROOT / "port").glob("*.java"))
+    host_sources = sorted(path for path in (ROOT / "port").glob("*.java") if path.name not in WITHDRAWN_SOURCE_FILES)
     module_sources = sorted((ROOT / "weather-pages-module/src").rglob("*.java"))
     if not splash_sources or not host_sources or not module_sources:
         raise ValueError("Host, splash and module Java source directories must all be present")
@@ -216,7 +280,7 @@ def compile_java(tc: dict[str, Path], inputs: Path) -> tuple[Path, Path, Path]:
     run(tc["javac"], "--release", "8", "-encoding", "UTF-8", "-classpath",
         os.pathsep.join(map(str, [tc["android"], stub_classes])), "-d", module, *module_sources)
     run(tc["javac"], "--release", "8", "-encoding", "UTF-8", "-classpath",
-        os.pathsep.join(map(str, [tc["android"], splash, splash_jar, mipush, stub_classes, webkit_jar()])), "-d", host, *host_sources)
+        os.pathsep.join(map(str, [tc["android"], splash, splash_jar, mipush, stub_classes, webkit_jar(), *neural_tts_dependencies()[0]])), "-d", host, *host_sources)
     return host, splash, module
 
 
@@ -298,10 +362,11 @@ def build_edition(edition: str, tc: dict[str, Path], inputs: Path,
     host_classes = sorted(host.rglob("*.class"))
     if edition == "normal":
         host_classes = [path for path in host_classes if not path.name.startswith("Test")]
+    host_classes, speech_jars = isolate_neural_kotlin(host_classes,neural_tts_dependencies()[0],WORK/"neural-isolated")
     run(tc["java"], "-cp", tc["d8"], "com.android.tools.r8.D8", "--lib", tc["android"],
         "--min-api", "28", "--output", stage, *host_classes, *sorted(splash.rglob("*.class")),
         inputs / "splash/splash-runtime-isolated.jar", inputs / "mipush/MiPush_SDK_Client_6_0_1-C.jar",
-        webkit_jar(),
+        webkit_jar(), *speech_jars,
         required(inputs / "pages/original-weather-pages.dex"), *sorted(module.rglob("*.class")))
     dex=stage / "classes.dex"
     dex.write_bytes(patch_weather_locale(dex.read_bytes()))
@@ -325,6 +390,9 @@ def build_edition(edition: str, tc: dict[str, Path], inputs: Path,
             entries[name] = path.read_bytes()
     for name, path in native.items():
         entries["lib/arm64-v8a/" + name] = path.read_bytes()
+    entries["lib/arm64-v8a/libsherpa-onnx-jni.so"] = neural_tts_dependencies()[1].read_bytes()
+    for name in ("libonnxruntime.so", "libonnxruntime4j_jni.so"):
+        entries["lib/arm64-v8a/" + name] = (WORK / "dependencies" / name).read_bytes()
     renderer = "lib/arm64-v8a/libhyper_opengl.so"
     entries[renderer] = patch_mgl_rendering(entries[renderer])
     entries["lib/arm64-v8a/libapp.so"] = patch_widget_settings(patch_dpi_settings(
@@ -335,12 +403,18 @@ def build_edition(edition: str, tc: dict[str, Path], inputs: Path,
             for path in sorted(directory.rglob("*")):
                 if path.is_file():
                     name = path.relative_to(directory).as_posix()
+                    if name.startswith("weather_sources/"):
+                        continue
                     if edition == "normal" and name.startswith("test-city/"):
                         continue
                     data = path.read_bytes()
                     if name == "oxygen_widget/source_manifest.json":
                         data = data.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
                     entries["assets/" + name] = data
+    # Ship the notices with redistributed speech runtimes and language assets.
+    for notice in sorted((ROOT / "third_party/neural_speech").glob("*")):
+        if notice.is_file():
+            entries["assets/licenses/neural_speech/" + notice.name] = notice.read_bytes()
     # Text fonts can fall back to Android without unregistering icon/symbol faces.
     font_manifest=json.loads(entries["assets/flutter_assets/FontManifest.json"])
     system_fonts=[family for family in font_manifest if family["family"].startswith("packages/hyperos/")]

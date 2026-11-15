@@ -41,7 +41,7 @@ def main():
         before.append(target)
     sources = [ROOT / 'tests/WidgetSkyRenderProbe.java', *before,
                *[ROOT / 'port' / f'{n}.java' for n in (*names, 'WeatherWidgetDayNight',
-                  'WeatherWidgetFonts', 'WeatherWidgetData', 'WeatherOxygenWidgetRenderer')]]
+                  'WeatherWidgetFonts', 'WeatherWidgetData', 'WeatherOxygenWidgetRenderer', 'WeatherOxygenBackground', 'WeatherWidgetGeometry')]]
     run([java / 'javac.exe', '--release', '8', '-encoding', 'UTF-8', '-cp', android,
          '-d', classes, *sources])
     run([java / 'java.exe', '-cp', bt / 'lib/d8.jar', 'com.android.tools.r8.D8', '--min-api', '28',
@@ -69,8 +69,13 @@ def main():
         output.write(dex / 'classes.dex', 'classes.dex')
         with ZipFile(args.asset_apk) as original:
             for name in original.namelist():
-                if name.startswith(('assets/weather_widget/', 'assets/weather_cards/', 'assets/oxygen_widget/')) or name == 'assets/fonts/MiSansVF.ttf':
+                if name.startswith(('assets/weather_widget/', 'assets/weather_cards/')) or name == 'assets/fonts/MiSansVF.ttf':
                     output.writestr(name, original.read(name))
+        # The source renderer requires its matching extracted sky rules/artwork;
+        # an older asset APK only supplies the unchanged Xiaomi/card assets/font.
+        for source in (ROOT / 'port/assets/oxygen_widget').rglob('*'):
+            if source.is_file():
+                output.write(source, 'assets/' + source.relative_to(ROOT / 'port/assets').as_posix())
     key = work / 'test.p12'
     if not key.exists():
         run([java / 'keytool.exe', '-genkeypair', '-keystore', key, '-storetype', 'PKCS12',

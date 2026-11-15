@@ -1,3 +1,9 @@
 * text=auto eol=lf
 *.png binary
 *.webp binary
+
+# Assets are hash-pinned inputs; checkout must not rewrite their line endings.
+port/assets/** -text whitespace=cr-at-eol
+*.onnx binary
+*.gz binary
+third_party/neural_speech/** -text -whitespace

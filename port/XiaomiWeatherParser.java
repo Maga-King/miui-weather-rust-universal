@@ -35,6 +35,13 @@ final class XiaomiWeatherParser {
                 .put("observedAtMs", observed == null ? 0 : observed.toInstant().toEpochMilli())
                 .put("zoneId", observed == null ? "" : observed.getOffset().getTotalSeconds()==0
                         ? "UTC" : "GMT" + observed.getOffset().getId());
+        if(observed==null) {
+            JSONObject metadata=response.optJSONObject("_weatherSource");
+            if(metadata!=null)try {
+                String providerZone=metadata.getString("zoneId");
+                java.time.ZoneId.of(providerZone);out.put("zoneId",providerZone);
+            } catch(Exception ignored) { /* Unavailable provider timezone stays unavailable. */ }
+        }
 
         JSONObject aqi = response.optJSONObject("aqi");
         if (aqi != null && successful(aqi)) {
@@ -42,9 +49,16 @@ final class XiaomiWeatherParser {
             if (index>=0) out.put("aqi", index);
         }
         JSONObject daily=response.optJSONObject("forecastDaily");
-        if (daily != null && successful(daily) && observed != null) {
+        OffsetDateTime dailyReference=observed;
+        JSONObject projection=response.optJSONObject("_weatherSource");
+        if (providerDailyDates(response)!=null) try {
+            long reference=projection.optLong("dailyReferenceAtMs",0);
+            if(reference>0)dailyReference=java.time.Instant.ofEpochMilli(reference)
+                    .atZone(java.time.ZoneId.of(projection.getString("zoneId"))).toOffsetDateTime();
+        } catch (Exception ignored) { /* Keep the real observation reference if supplied. */ }
+        if (daily != null && successful(daily) && dailyReference != null) {
             JSONArray sun=values(daily.optJSONObject("sunRiseSet"));
-            int day=forecastIndex(daily, sun, observed.toLocalDate());
+            int day=forecastIndex(response, daily, sun, dailyReference.toLocalDate());
             if (day>=0) {
                 JSONObject temps=daily.optJSONObject("temperature");
                 JSONObject range=item(values(temps), day);
@@ -58,9 +72,9 @@ final class XiaomiWeatherParser {
                 JSONObject pair=item(sun, day);
                 if (pair != null) {
                     OffsetDateTime rise=date(pair.optString("from", "")), set=date(pair.optString("to", ""));
-                    if (rise != null && rise.toLocalDate().equals(observed.toLocalDate()))
+                    if (rise != null && rise.toLocalDate().equals(dailyReference.toLocalDate()))
                         out.put("sunriseMinute",rise.getHour()*60+rise.getMinute());
-                    if (set != null && set.toLocalDate().equals(observed.toLocalDate()))
+                    if (set != null && set.toLocalDate().equals(dailyReference.toLocalDate()))
                         out.put("sunsetMinute",set.getHour()*60+set.getMinute());
                 }
             }
@@ -69,7 +83,15 @@ final class XiaomiWeatherParser {
         return new WeatherWidgetData(out);
     }
 
-    private static int forecastIndex(JSONObject daily, JSONArray suns, LocalDate date) {
+    private static int forecastIndex(JSONObject response,JSONObject daily, JSONArray suns, LocalDate date) {
+        JSONArray dates=providerDailyDates(response);
+        if(dates!=null) {
+            for(int i=0;i<dates.length();i++) {
+                OffsetDateTime time=providerDailyTime(response,i);
+                if(time!=null&&time.toLocalDate().equals(date))return i;
+            }
+            return -1;
+        }
         if (suns != null) for (int i=0;i<suns.length();i++) {
             JSONObject pair=item(suns,i);
             OffsetDateTime rise=pair==null?null:date(pair.optString("from", ""));
@@ -79,6 +101,20 @@ final class XiaomiWeatherParser {
         if (issued==null) return -1;
         long offset=ChronoUnit.DAYS.between(issued.toLocalDate(),date);
         return offset>=0 && offset<=30 ? (int)offset : -1;
+    }
+    static JSONArray providerDailyDates(JSONObject response) {
+        JSONObject metadata=response.optJSONObject("_weatherSource");
+        return metadata!=null&&"provider_calendar_origin".equals(metadata.optString("originalDailyPubTimeKind",""))
+                ?metadata.optJSONArray("dailyDates"):null;
+    }
+    /** Explicit provider dates identify forecast rows independently of optional sunrise. */
+    static OffsetDateTime providerDailyTime(JSONObject response,int index) {
+        JSONArray dates=providerDailyDates(response);
+        if(dates==null||index<0||index>=dates.length())return null;
+        try {
+            return LocalDate.parse(dates.getString(index)).atStartOfDay(java.time.ZoneId.of(
+                    response.getJSONObject("_weatherSource").getString("zoneId"))).toOffsetDateTime();
+        } catch (Exception ignored) {return null;}
     }
     private static void addRain(JSONObject out, JSONObject minutely) throws JSONException {
         JSONObject rain=minutely==null?null:minutely.optJSONObject("precipitation");

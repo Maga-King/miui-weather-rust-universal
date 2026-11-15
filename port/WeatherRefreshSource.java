@@ -20,6 +20,8 @@ public interface WeatherRefreshSource {
         public final boolean networkVerified, retryable;
         public final String reason;
         public org.json.JSONObject rawResponse;
+        /** Captured before HTTP; never resolve source provenance after the request completes. */
+        public WeatherSourceSession sourceSession;
         private Result(WeatherWidgetData observation, boolean verified, boolean retryable, String reason) {
             this.observation = observation; this.networkVerified = verified;
             this.retryable = retryable; this.reason = reason;

@@ -13,11 +13,15 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import miuix.appcompat.widget.Button;
 import miuix.appcompat.widget.Spinner;
+import miuix.slidingwidget.widget.SlidingButton;
+import miuix.androidbasewidget.widget.SeekBar;
 
 /** Launcher reconfiguration and in-app management share the per-instance editor. */
 public final class WeatherWidgetConfigureActivity extends WeatherWidgetSettingsActivity {
     private int widgetId;
     private Spinner first,second,panel;
+    private SlidingButton sizeEditing;
+    private SeekBar widthSlider,heightSlider;
     private final ArrayList<String> firstIds=new ArrayList<>(),secondIds=new ArrayList<>();
 
     @Override public void onCreate(Bundle state) {
@@ -40,6 +44,7 @@ public final class WeatherWidgetConfigureActivity extends WeatherWidgetSettingsA
             if(second!=null)select(second,secondIds,state.getString("second",""));
             if(panel!=null)panel.setSelection(Math.max(0,Math.min(3,state.getInt("panel",0))));
         }
+        sizeControls(content,state);
         note(content,dual?(chinese?"左侧默认跟随定位城市；定位城市不可用时显示首页城市。右侧城市单独选择。":"The left side follows your located city, falling back to the first city. Choose the right city separately.")
                 :(chinese?"默认跟随首页第一个城市，也可以为这个小组件指定其他城市。":"Follow your first city, or choose a different city for this widget."));
         if(choices.length()==0)note(content,chinese?"暂无已添加的城市，请先在天气首页添加城市。":"Add a city in Weather first.");
@@ -61,10 +66,15 @@ public final class WeatherWidgetConfigureActivity extends WeatherWidgetSettingsA
         if(widgetInfo()==null){finish();return;}
         String city=firstIds.get(first.getSelectedItemPosition());
         String other=second==null?WeatherWidgetPreferences.secondCityId(this,widgetId):secondIds.get(second.getSelectedItemPosition());
-        if(!WeatherWidgetPreferences.save(this,widgetId,city,other,panel==null?WeatherWidgetPreferences.panel(this,widgetId):panel.getSelectedItemPosition())) {
+        boolean cityChanged=!city.equals(WeatherWidgetPreferences.cityId(this,widgetId))
+                ||!other.equals(WeatherWidgetPreferences.secondCityId(this,widgetId));
+        if(!WeatherWidgetPreferences.save(this,widgetId,city,other,panel==null?WeatherWidgetPreferences.panel(this,widgetId):panel.getSelectedItemPosition(),
+                sizeEditing.isChecked(),widthSlider.getProgress()+WeatherWidgetGeometry.MIN,heightSlider.getProgress()+WeatherWidgetGeometry.MIN)) {
             Toast.makeText(this,chinese?"无法保存，请重试":"Could not save. Try again.",Toast.LENGTH_SHORT).show();return;
         }
-        WeatherWidgetProvider.updateAll(this);WeatherRefresh.requestManual(this);
+        WeatherWidgetProvider.updateAll(this);
+        // Selecting another city needs its weather; geometry alone only repaints the cache.
+        if(cityChanged)WeatherRefresh.requestManual(this);else WeatherRefresh.requestAutomatic(this);
         setResult(RESULT_OK,new Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID,widgetId));finish();
     }
 
@@ -94,9 +104,47 @@ public final class WeatherWidgetConfigureActivity extends WeatherWidgetSettingsA
 
     private void select(Spinner spinner,ArrayList<String> ids,String value){int at=ids.indexOf(value);if(at>=0)spinner.setSelection(at);}
 
+    private void sizeControls(LinearLayout parent,Bundle state) {
+        boolean enabled=state==null?WeatherWidgetPreferences.sizeEditing(this,widgetId):state.getBoolean("size_editing");
+        int width=state==null?WeatherWidgetPreferences.savedWidthPercent(this,widgetId):state.getInt("width_percent",100);
+        int height=state==null?WeatherWidgetPreferences.savedHeightPercent(this,widgetId):state.getInt("height_percent",100);
+        LinearLayout row=card(parent);row.setOrientation(LinearLayout.HORIZONTAL);row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        row.addView(text(chinese?"自定义小组件尺寸":"Custom widget size",17,false),new LinearLayout.LayoutParams(0,dp(52),1));
+        sizeEditing=new SlidingButton(this);sizeEditing.setContentDescription(chinese?"自定义小组件尺寸":"Custom widget size");
+        sizeEditing.setChecked(enabled);row.addView(sizeEditing,new LinearLayout.LayoutParams(-2,-2));
+        widthSlider=sizeSlider(parent,chinese?"宽度":"Width",width);
+        heightSlider=sizeSlider(parent,chinese?"高度":"Height",height);
+        Runnable update=()->{boolean edit=sizeEditing.isChecked();widthSlider.setEnabled(edit);heightSlider.setEnabled(edit);
+            widthSlider.setAlpha(edit?1f:.4f);heightSlider.setAlpha(edit?1f:.4f);};
+        sizeEditing.setOnCheckedChangeListener((button,checked)->update.run());
+        row.setOnClickListener(v->sizeEditing.setChecked(!sizeEditing.isChecked()));update.run();
+        Button reset=new Button(this);reset.setText(chinese?"恢复 100%":"Reset to 100%");
+        reset.setOnClickListener(v->{widthSlider.setProgress(100-WeatherWidgetGeometry.MIN);heightSlider.setProgress(100-WeatherWidgetGeometry.MIN);});
+        parent.addView(reset,new LinearLayout.LayoutParams(-1,-2));
+        note(parent,chinese?"只调整这个小组件的可见卡片；关闭后恢复原尺寸。100% 为当前默认，50%–150% 可分别调整宽高。放大超出桌面分配区域时会被裁切，请用桌面拖动边框增加格数。"
+                :"Changes only this card. Off restores the default. Adjust width and height from 50% to 150%; enlargement is clipped by the launcher allocation. Resize the widget on your home screen for more space.");
+    }
+
+    private SeekBar sizeSlider(LinearLayout parent,String title,int percent) {
+        LinearLayout row=card(parent);TextView label=text(title,16,false);row.addView(label);
+        SeekBar slider=new SeekBar(this,null);slider.setMax(WeatherWidgetGeometry.MAX-WeatherWidgetGeometry.MIN);
+        slider.setProgress(WeatherWidgetGeometry.clamp(percent)-WeatherWidgetGeometry.MIN);
+        slider.setContentDescription(title);row.addView(slider,new LinearLayout.LayoutParams(-1,dp(48)));
+        label.setText(title+" · "+(slider.getProgress()+WeatherWidgetGeometry.MIN)+"%");
+        slider.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener(){
+            public void onProgressChanged(android.widget.SeekBar view,int progress,boolean fromUser){label.setText(title+" · "+(progress+WeatherWidgetGeometry.MIN)+"%");}
+            public void onStartTrackingTouch(android.widget.SeekBar view){}
+            public void onStopTrackingTouch(android.widget.SeekBar view){}
+        });return slider;
+    }
+
     @Override public void onSaveInstanceState(Bundle state) {
         if(first!=null)state.putString("first",firstIds.get(first.getSelectedItemPosition()));
         if(second!=null)state.putString("second",secondIds.get(second.getSelectedItemPosition()));
-        if(panel!=null)state.putInt("panel",panel.getSelectedItemPosition());super.onSaveInstanceState(state);
+        if(panel!=null)state.putInt("panel",panel.getSelectedItemPosition());
+        if(sizeEditing!=null)state.putBoolean("size_editing",sizeEditing.isChecked());
+        if(widthSlider!=null)state.putInt("width_percent",widthSlider.getProgress()+WeatherWidgetGeometry.MIN);
+        if(heightSlider!=null)state.putInt("height_percent",heightSlider.getProgress()+WeatherWidgetGeometry.MIN);
+        super.onSaveInstanceState(state);
     }
 }

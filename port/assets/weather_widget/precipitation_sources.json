@@ -1,0 +1,18 @@
+{
+  "template": "b8006e83-c497-4642-9815-f674b82842b0/widget_2x2",
+  "archive_sha256": "a52e1d5931026a3a5d5665e6910f789bc432725cd57046f05503d088efdd67a2",
+  "resources": [
+    {
+      "source": "assets/texture/rain.png",
+      "destination": "port/assets/weather_widget/texture/rain.png",
+      "sha256": "5c014a0841598338b713864d613b39dc40700b69f38684de2777065df4b437fd",
+      "bytes": 175
+    },
+    {
+      "source": "assets/texture/snow.png",
+      "destination": "port/assets/weather_widget/texture/snow.png",
+      "sha256": "de60b47bf5df4a06ea24aa3d6415d1f825001a125e1fe34883b762cf10a70f7e",
+      "bytes": 187
+    }
+  ]
+}

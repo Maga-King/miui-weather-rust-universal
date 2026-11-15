@@ -21,11 +21,12 @@ public final class WeatherRefreshJobService extends JobService {
     private static final long TIMEOUT_MS = 60_000;
     private static final class Work {
         final JobParameters parameters;
+        final WeatherSourceSession sourceSession;
         final CancellationSignal cancellation = new CancellationSignal();
         final long widgetDeadlineElapsed = SystemClock.elapsedRealtime() + TIMEOUT_MS - 5000;
         Future<?> future;
         Runnable timeout;
-        Work(JobParameters parameters) { this.parameters = parameters; }
+        Work(JobParameters parameters,WeatherSourceSession sourceSession) { this.parameters = parameters;this.sourceSession=sourceSession; }
     }
 
     @Override public boolean onStartJob(JobParameters parameters) {
@@ -44,13 +45,13 @@ public final class WeatherRefreshJobService extends JobService {
             return false;
         }
         WeatherRefresh.started(parameters);
-        Work work = new Work(parameters);
+        Work work = new Work(parameters,WeatherSources.current(this));
         jobs.put(parameters.getJobId(), work);
         work.timeout = () -> {
             if (jobs.get(parameters.getJobId()) != work) return;
             work.cancellation.cancel();
             if (work.future != null) work.future.cancel(true);
-            WeatherRefresh.failed(this, "source_timeout");
+            if(WeatherSources.isCurrent(this,work.sourceSession))WeatherRefresh.failed(this, "source_timeout");
             finish(work, true);
         };
         main.postDelayed(work.timeout, TIMEOUT_MS);
@@ -68,9 +69,10 @@ public final class WeatherRefreshJobService extends JobService {
                     outcome = WeatherRefreshSource.Result.blocked("automatic_deferred");
                 else {
                     WeatherRefresh.attempted(this);
-                    selection = WeatherDatabaseBridge.firstCity(this);
-                    outcome = source.fetch(getApplicationContext(), WeatherWidgetCache.read(this), work.cancellation);
+                    selection = WeatherDatabaseBridge.firstCity(this,work.sourceSession);
+                    outcome = source.fetch(getApplicationContext(), WeatherWidgetCache.read(this,work.sourceSession), work.cancellation);
                     if (outcome == null) outcome = WeatherRefreshSource.Result.failed("empty_source_response", true);
+                    if(outcome.sourceSession==null&&work.sourceSession.xiaomi())outcome.sourceSession=work.sourceSession;
                 }
             } catch (Exception error) {
                 // Error types only: provider URLs or keys must not enter widget state/logs.
@@ -79,13 +81,13 @@ public final class WeatherRefreshJobService extends JobService {
             boolean additionalRetry = false;
             // Widget cities use the same eligible Job and cancellation signal. A primary
             // failure must not prevent other explicitly configured widget cities refreshing.
-            if (source instanceof XiaomiWeatherRefreshSource && !work.cancellation.isCanceled()
+            if (source instanceof WeatherCityRefreshSource && !work.cancellation.isCanceled()
                     && WeatherRefresh.automaticCurrent(this, parameters)
                     && !"automatic_deferred".equals(outcome.reason)
                     && !"automatic_cancelled".equals(outcome.reason)) {
                 try {
                     additionalRetry = WeatherWidgetCityCache.refreshWidgets(getApplicationContext(),
-                            (XiaomiWeatherRefreshSource)source, selection, outcome,
+                            (WeatherCityRefreshSource)source, selection, outcome,
                             work.cancellation, work.widgetDeadlineElapsed);
                 } catch (Exception error) {
                     additionalRetry = true;
@@ -95,7 +97,9 @@ public final class WeatherRefreshJobService extends JobService {
             boolean widgetRetry = additionalRetry;
             WeatherDatabaseBridge.City requestedCity = selection;
             main.post(() -> {
+                synchronized(WeatherSources.LOCK) {
                 if (jobs.get(parameters.getJobId()) != work || work.cancellation.isCanceled()) return;
+                if(!WeatherSources.isCurrent(this,work.sourceSession)){finish(work,false);return;}
                 if (!WeatherRefresh.networkAllowed(this)) { finish(work, false); return; }
                 if (!WeatherRefresh.automaticCurrent(this, parameters)) { finish(work, false); return; }
                 boolean retry = result.retryable || widgetRetry;
@@ -103,7 +107,7 @@ public final class WeatherRefreshJobService extends JobService {
                     // Selection can change after the source's final check while this
                     // completion waits in the main queue. Never overwrite that city's cache.
                     try {
-                        if (requestedCity == null || !requestedCity.sameSelection(WeatherDatabaseBridge.firstCity(this))
+                        if (result.sourceSession==null||!work.sourceSession.same(result.sourceSession)||requestedCity == null || !requestedCity.sameSelection(WeatherDatabaseBridge.firstCity(this,work.sourceSession))
                                 || !requestedCity.id.equals(result.observation.cityId)
                                 || !requestedCity.unit.equals(result.observation.unit)) {
                             WeatherRefresh.failed(this, "selected_city_changed");
@@ -113,15 +117,16 @@ public final class WeatherRefreshJobService extends JobService {
                         WeatherRefresh.failed(this, error.getClass().getSimpleName());
                         finish(work, true); return;
                     }
-                    if (!WeatherRefresh.publishNetworkSuccess(this, result.observation)) {
+                    if (!WeatherRefresh.publishNetworkSuccess(this, result.observation,work.sourceSession)) {
                         WeatherRefresh.failed(this, "cache_write_failed"); retry = true;
                     }
-                    if(result.rawResponse!=null)WeatherAlerts.onWeatherResponse(this,requestedCity,result.rawResponse);
+                    if(result.rawResponse!=null)WeatherAlerts.onWeatherResponse(this,requestedCity,result.rawResponse,work.sourceSession);
                 } else if ("automatic_deferred".equals(result.reason)) {
                     finish(work, true); return;
                 } else if (retry) WeatherRefresh.failed(this, result.reason);
                 else WeatherRefresh.blocked(this, result.reason);
                 finish(work, retry);
+                }
             });
         });
         return true;
@@ -133,7 +138,7 @@ public final class WeatherRefreshJobService extends JobService {
         // Explicit successors preserve the local quiet window even after a manual
         // attempt fails; Android's retry would retain its manual-bypass extras.
         jobFinished(work.parameters, false);
-        WeatherRefresh.completed(this, work.parameters, retry);
+        if(WeatherSources.isCurrent(this,work.sourceSession))WeatherRefresh.completed(this, work.parameters, retry);
     }
     @Override public boolean onStopJob(JobParameters parameters) {
         Work work = jobs.get(parameters.getJobId());
@@ -144,6 +149,7 @@ public final class WeatherRefreshJobService extends JobService {
         if (work.future != null) work.future.cancel(true);
         WeatherRefresh.IN_FLIGHT.set(false); WeatherRefresh.released(parameters);
         if (!WeatherRefresh.networkAllowed(this)) return false;
+        if(!WeatherSources.isCurrent(this,work.sourceSession))return false;
         if (!WeatherRefresh.automaticCurrent(this, parameters)) return false;
         if (Build.VERSION.SDK_INT >= 31 && (parameters.getStopReason() == JobParameters.STOP_REASON_CANCELLED_BY_APP
                 || parameters.getStopReason() == JobParameters.STOP_REASON_USER)) return false;

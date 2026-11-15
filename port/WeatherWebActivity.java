@@ -37,6 +37,8 @@ public final class WeatherWebActivity extends Activity {
         initialUrl = AndroidWeatherPages.webUrl(getIntent().getStringExtra(EXTRA_URL));
         if (initialUrl == null) { finish(); return; }
         boolean dark = (getResources().getConfiguration().uiMode & 0x30) == 0x20;
+        WeatherSystemBars.edgeToEdge(getWindow());
+        WeatherSystemBars.iconAppearance(getWindow(),!dark,!dark);
         int background = dark ? Color.rgb(20,20,20) : Color.WHITE;
         int foreground = dark ? Color.WHITE : Color.BLACK;
         LinearLayout root = new LinearLayout(this);
@@ -44,7 +46,7 @@ public final class WeatherWebActivity extends Activity {
         root.setBackgroundColor(background);
         root.setOnApplyWindowInsetsListener((v, insets) -> {
             if (Build.VERSION.SDK_INT >= 30) {
-                android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout() | WindowInsets.Type.ime());
                 v.setPadding(bars.left, bars.top, bars.right, bars.bottom);
             } else {
                 v.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),

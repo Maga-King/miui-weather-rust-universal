@@ -1,0 +1,30 @@
+{
+  "format": 1,
+  "g2pm": "original np_ckpt.pkl BiLSTM",
+  "bertLayout": "[phones,1024]",
+  "boundary": "Leading sentence boundary matching the approved V2ProPlus 。+text path",
+  "unsupported": "Unknown pronunciation, unrecognized Latin abbreviation, supplementary Chinese character: explicit exception; no zero BERT substitute.",
+  "normalization": "Chinese weather numbers, signed temperatures, percentages, dates, times, wind/rain units. mm/km/h and common weather abbreviations repaired before upstream normalization.",
+  "files": {
+    "g2pm.onnx": {
+      "bytes": 1609162,
+      "sha256": "20e71678d4c139951cdc3cb6d5decd321bd3d5570f7f03cf8ba67935b219cffa"
+    },
+    "lexicon.bin.gz": {
+      "bytes": 3763487,
+      "sha256": "f04d87004d97ee1d7c022b174b80e0a4770632ae246640ca50224928c6cda724"
+    },
+    "README.txt": {
+      "bytes": 1532,
+      "sha256": "4b777cbacd79f52b1e84b219e9a3f35734e80aa585670ff96199c6d8d5a2e04f"
+    },
+    "tone_words.txt": {
+      "bytes": 3237,
+      "sha256": "19b27dfefd84fc3f516b734de53cc64ba326d1039df12f603a4f2533e1960953"
+    },
+    "vocab.txt": {
+      "bytes": 109540,
+      "sha256": "45bbac6b341c319adc98a532532882e91a9cefc0329aa57bac9ae761c27b291c"
+    }
+  }
+}

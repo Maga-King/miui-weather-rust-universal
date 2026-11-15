@@ -16,6 +16,8 @@ def main():
     parser.add_argument('--sdk',type=Path,required=True)
     parser.add_argument('--java-home',type=Path,required=True)
     parser.add_argument('--serial',required=True)
+    parser.add_argument('--background-only',action='store_true',help='Only exercise the background system UI')
+    parser.add_argument('--build-only',action='store_true',help='Build the disposable probe without touching the device')
     args=parser.parse_args()
     work=ROOT/'.build/android12-13-fix/permission-probe';work.mkdir(parents=True,exist_ok=True)
     classes=work/'classes';classes.mkdir(exist_ok=True)
@@ -25,7 +27,8 @@ def main():
     def run(command,**kwargs):return subprocess.run([str(x) for x in command],check=True,**kwargs)
     def shell(*command):return run(adb+['shell',*command],capture_output=True,text=True,encoding='utf-8').stdout.strip()
     run([java/'javac.exe','--release','8','-encoding','UTF-8','-classpath',android,'-d',classes,
-        ROOT/'port/AndroidPermissions.java',ROOT/'port/AndroidLocation.java',ROOT/'tests/PermissionRegressionProbe.java'])
+        ROOT/'port/AndroidPermissions.java',ROOT/'port/AndroidLocation.java',ROOT/'port/AndroidLocationLabels.java',
+        ROOT/'port/WeatherAppearancePreferences.java',ROOT/'tests/PermissionRegressionProbe.java'])
     run([java/'java.exe','-cp',bt/'lib/d8.jar','com.android.tools.r8.D8','--min-api','28','--lib',android,'--output',dex,*classes.rglob('*.class')])
     manifest=work/'AndroidManifest.xml'
     manifest.write_text('''<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="dev.weather.permissionprobe">
@@ -44,6 +47,8 @@ def main():
     if not key.exists():run([java/'keytool.exe','-genkeypair','-keystore',key,'-storetype','PKCS12','-alias','test',
         '-storepass','android','-keypass','android','-dname','CN=PermissionRegressionTest','-keyalg','RSA','-validity','30'],capture_output=True)
     run([java/'java.exe','-jar',bt/'lib/apksigner.jar','sign','--ks',key,'--ks-pass','pass:android','--out',apk,aligned])
+    if args.build_only:
+        print(apk);return
     if subprocess.run(adb+['shell','pm','path',PACKAGE],capture_output=True).returncode==0:raise RuntimeError('Probe package already exists')
     run(adb+['install','--no-incremental',apk],capture_output=True)
     def dump():
@@ -81,7 +86,7 @@ def main():
         raise AssertionError('Permission completion was lost')
     reports={}
     try:
-        for mode in ('common','legacy'):
+        for mode in (() if args.background_only else ('common','legacy')):
             start(mode)
             tap_node(lambda n:n.get('resource-id','').endswith('permission_allow_foreground_only_button'))
             value=result();assert value['fine']==0 and value['coarse']==0,value
@@ -90,26 +95,44 @@ def main():
             assert event['arguments']['permissions']==['android.permission.ACCESS_FINE_LOCATION'],event
             assert event['arguments']['grant_results']==[0],event
             reports[mode]=value
-        start('common')
-        tap_node(lambda n:n.get('resource-id','').endswith('permission_deny_button'))
-        value=result();assert value['fine']==-1 and value['coarse']==-1,value
-        assert value['events'][0]['arguments']['grant_results']==[-1],value
-        reports['denied']=value
-        start('background',True)
-        tap_node(lambda n:n.get('resource-id')=='android:id/button2')
-        value=result();assert value['background']==-1 and value['fine']==0,value
-        assert value['events'][0]['arguments']['grant_results']==[-1],value
-        reports['background_cancel']=value
+        if not args.background_only:
+            start('common')
+            tap_node(lambda n:n.get('resource-id','').endswith('permission_deny_button'))
+            value=result();assert value['fine']==-1 and value['coarse']==-1,value
+            assert value['events'][0]['arguments']['grant_results']==[-1],value
+            reports['denied']=value
+        def system_background_ui():
+            root=dump()
+            nodes=list(root.iter('node'))
+            texts=[n.get('text','') for n in nodes]
+            assert '前往系统设置' not in texts, 'Custom explanation must not replace the system request'
+            packages={n.get('package','') for n in nodes}
+            known={'com.android.permissioncontroller','com.google.android.permissioncontroller',
+                   'com.android.settings','com.lbe.security.miui','com.miui.securitycenter',
+                   'com.oplus.securitypermission'}
+            assert packages & known, ('Expected system permission UI',packages,texts)
+            return root
         for grant in (False,True):
             start('background',True)
-            tap_node(lambda n:n.get('resource-id')=='android:id/button1')
-            assert 'com.android.settings' in shell('dumpsys','activity','activities')
-            if grant:shell('pm','grant',PACKAGE,'android.permission.ACCESS_BACKGROUND_LOCATION')
-            shell('input','keyevent','KEYCODE_BACK')
+            root=system_background_ui()
+            (work/('background-grant.xml' if grant else 'background-back.xml')).write_text(ET.tostring(root,encoding='unicode'),encoding='utf-8')
+            # Leave the real system screen visible past the watchdog deadline.
+            time.sleep(3.2)
+            pending=json.loads(shell('run-as',PACKAGE,'cat','files/result.json'))
+            assert not pending['events'], 'Must not time out a visible system permission page'
+            if grant:
+                tap_node(lambda n:n.get('text','').strip().lower() in ('始终允许','始终允许访问','允许所有时间','allow all the time')
+                         or n.get('resource-id','').endswith(('permission_allow_always_button','allow_always_radio_button')))
+                time.sleep(.3)
+                state=json.loads(shell('run-as',PACKAGE,'cat','files/result.json'))
+                if not state['events']:
+                    system_background_ui();shell('input','keyevent','KEYCODE_BACK')
+            else:
+                system_background_ui();shell('input','keyevent','KEYCODE_BACK')
             value=result();assert value['background']==(0 if grant else -1),value
             assert value['events'][0]['arguments']['grant_results']==[0 if grant else -1],value
-            reports['background_settings_'+str(grant)]=value
-        for grant in (False,True):
+            reports['background_system_'+str(grant)]=value
+        for grant in (() if args.background_only else (False,True)):
             start('backend')
             tap_node(lambda n:n.get('resource-id','').endswith(
                 'permission_allow_foreground_only_button' if grant else 'permission_deny_button'))
@@ -120,7 +143,7 @@ def main():
             else:assert value['coarse']==-1 and event.get('errorCode')=='PERMISSION_DENIED',value
             reports['backend_'+str(grant)]=value
         (work/'result.json').write_text(json.dumps(reports,ensure_ascii=False,indent=2),encoding='utf-8')
-        print('PASS: real foreground system dialogs (common + legacy + direct location); denial; background Settings cancel/return/real grant; lifecycle and exact callback codec shapes')
+        print('PASS: real system permission requests; background back/grant, visible UI protected past 3 seconds, exact callback and real grant checks')
     finally:
         diagnostic=subprocess.run(adb+['shell','run-as',PACKAGE,'cat','files/result.json'],capture_output=True,text=True,encoding='utf-8')
         (work/'last-state.txt').write_text(diagnostic.stdout+diagnostic.stderr,encoding='utf-8')

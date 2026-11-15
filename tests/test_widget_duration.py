@@ -94,7 +94,7 @@ def main():
         classes.mkdir()
         libraries = os.pathsep.join(map(str, (args.json_jar, args.android_jar)))
         sources = [ROOT / 'port' / f'{name}.java' for name in
-                   ('WeatherWidgetRenderer', 'WeatherWidgetFonts', 'WeatherWidgetData', 'WeatherWidgetDayNight')]
+                   ('WeatherWidgetRenderer', 'WeatherWidgetFonts', 'WeatherWidgetData', 'WeatherWidgetDayNight', 'WeatherWidgetGeometry')]
         subprocess.run([str(java / ('javac' + suffix)), '-encoding', 'UTF-8', '-classpath',
                         libraries, '-d', str(classes), str(probe), *map(str, sources)], check=True)
         inputs, expected, cases = [], [], []

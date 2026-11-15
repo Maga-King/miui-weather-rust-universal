@@ -19,6 +19,14 @@ public final class WeatherAppearanceActivity extends WeatherWidgetSettingsActivi
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);setTitle(chinese?"字体与动画":"Display options");
         LinearLayout content=page();
+        link(content,chinese?"天气播报":"Weather narration",chinese?"声音、离线模型与语速":"Voices, offline models and speech rate",
+                ()->startActivity(new Intent(this,WeatherSpeechSettingsActivity.class)));
+        link(content,chinese?"后台更新与通知":"Background updates and notifications",chinese?"查看后台状态与系统权限":"Background status and system permissions",
+                ()->startActivity(new Intent(this,WeatherBackgroundSettingsActivity.class)));
+        note(content,chinese?"\u4e3b\u9875\u6548\u679c":"Home appearance");
+        toggle(content,chinese?"\u4e3b\u9875\u5361\u7247\u6a21\u7cca":"Blur home cards",
+                chinese?"\u9ed8\u8ba4\u5f00\u542f\uff1b\u53ea\u5f71\u54cd\u5929\u6c14\u4e3b\u9875\uff0c\u4e0d\u5f71\u54cd\u684c\u9762\u5c0f\u7ec4\u4ef6":"On by default; affects the Weather home screen, not widgets",
+                WeatherAppearancePreferences.homeCardBlurEnabled(this),enabled->saveFlag("home_card_blur",enabled));
         note(content,chinese?"字体":"Font");
         toggle(content,chinese?"使用 MiSans":"Use MiSans",chinese?"关闭后跟随系统字体":"Turn off to use your system font",WeatherFonts.miSansEnabled(this),
                 enabled->{WeatherFonts.setMiSansEnabled(this,enabled);WeatherFonts.apply(this);});
@@ -67,6 +75,10 @@ public final class WeatherAppearanceActivity extends WeatherWidgetSettingsActivi
     }
 
     private interface Change {void changed(boolean enabled);}
+    private void saveFlag(String key,boolean enabled) {
+        if("home_card_blur".equals(key)) WeatherAppearancePreferences.setHomeCardBlurEnabled(this,enabled);
+        else throw new IllegalArgumentException("Unknown appearance option: "+key);
+    }
     private void toggle(LinearLayout parent,String title,String summary,boolean enabled,Change change) {
         LinearLayout row=card(parent);row.setOrientation(LinearLayout.HORIZONTAL);row.setGravity(Gravity.CENTER_VERTICAL);
         row.setMinimumHeight(dp(92));

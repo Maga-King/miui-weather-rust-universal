@@ -106,8 +106,12 @@ public final class AndroidConsent {
         if (PERMISSION_EDITOR.equals(action)
                 || Settings.ACTION_APPLICATION_DETAILS_SETTINGS.equals(action)) {
             String target = string(extra(extras, "string_extra_map", "extra_pkgname"));
-            if (target != null && !ORIGINAL_PACKAGE.equals(target)
-                    && !activity.getPackageName().equals(target)) return UNHANDLED;
+            // Original XMS flows can name com.miui.core (System SDK). This port
+            // owns its Android location backend and must only edit its own grant.
+            // Returning UNHANDLED here would let the generic bridge launch MIUI's
+            // permission editor for the original foreign package.
+            if (target != null && !activity.getPackageName().equals(target))
+                Log.i(TAG, "Mapping permission settings target " + target + " to " + activity.getPackageName());
             if (forResult && !(requestCode instanceof Number)) return UNHANDLED;
             Integer code = forResult ? ((Number) requestCode).intValue() : null;
             main.post(() -> openApplicationSettings(code));

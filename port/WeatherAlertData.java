@@ -34,16 +34,26 @@ final class WeatherAlertData {
         }
         return out;
     }
-    /** Date comes from explicit sunrise dates, or the forecast issue-date offset. */
+    /** Provider dates identify alternate rows; ordinary Xiaomi uses its original issue/sun contract. */
     static String forecast(JSONObject response,LocalDate date,String displayUnit,String locale,long now) {
         try {
             JSONObject daily=response.optJSONObject("forecastDaily");
             if(!ok(daily))return null;
             OffsetDateTime issued=OffsetDateTime.parse(daily.getString("pubTime"));
-            long age=now-issued.toInstant().toEpochMilli();
+            JSONArray providerDates=XiaomiWeatherParser.providerDailyDates(response);
+            long freshness=providerDates==null?issued.toInstant().toEpochMilli()
+                    :response.getJSONObject("_weatherSource").optLong("fetchedAtMs",0);
+            if(freshness<=0)return null;
+            long age=now-freshness;
             if(age< -300_000||age>DAY)return null;
             JSONArray suns=values(daily.optJSONObject("sunRiseSet"));int index=-1;
-            if(suns!=null) for(int i=0;i<suns.length();i++) {
+            if(providerDates!=null) {
+                for(int i=0;i<providerDates.length();i++) {
+                    OffsetDateTime providerDate=XiaomiWeatherParser.providerDailyTime(response,i);
+                    if(providerDate!=null&&date.equals(providerDate.toLocalDate())) {index=i;break;}
+                }
+                if(index<0)return null;
+            } else if(suns!=null) for(int i=0;i<suns.length();i++) {
                 JSONObject pair=suns.optJSONObject(i);
                 if(pair!=null && date.equals(OffsetDateTime.parse(pair.getString("from")).toLocalDate())) {index=i;break;}
             }

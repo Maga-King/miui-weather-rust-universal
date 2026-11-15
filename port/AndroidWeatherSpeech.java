@@ -94,7 +94,10 @@ public final class AndroidWeatherSpeech {
         main.postDelayed(initTimeout, 12000);
         try {
             // Always post: some engines invoke onInit before the constructor returns.
-            engine = new TextToSpeech(context, status -> main.post(() -> initialized(attempt, status)));
+            TextToSpeech.OnInitListener listener=status -> main.post(() -> initialized(attempt, status));
+            engine = WeatherSpeechPreferences.local(context)
+                    ? new TextToSpeech(context,listener,context.getPackageName())
+                    : new TextToSpeech(context,listener);
         } catch (RuntimeException error) {
             Log.w(TAG, "Cannot connect to system TTS", error);
             initFailed("tts_unavailable", "系统语音引擎不可用，请在系统设置中安装或启用文字转语音引擎。");
@@ -108,6 +111,9 @@ public final class AndroidWeatherSpeech {
             return;
         }
         try {
+            if(WeatherSpeechPreferences.local(context)&&!WeatherSpeechPreferences.isPrivateEngine(engine)){
+                initFailed("tts_local_unavailable", "本地语音引擎连接失败，请重试或关闭本地自然语音。");return;
+            }
             engine.setAudioAttributes(attributes);
             engine.setOnUtteranceProgressListener(new UtteranceProgressListener() {
                 @Override public void onStart(String id) { main.post(() -> {
@@ -158,6 +164,7 @@ public final class AndroidWeatherSpeech {
             }
             Locale language = chinese ? Locale.SIMPLIFIED_CHINESE : context.getResources().getConfiguration().getLocales().get(0);
             int supported = engine.setLanguage(language);
+            engine.setSpeechRate(WeatherNeuralSpeechModels.ratePercent(context)/100f);
             if (supported < TextToSpeech.LANG_AVAILABLE) {
                 reply.error("tts_language_unavailable", "The system speech engine has no voice for " + language);
                 event("on_error");
@@ -178,6 +185,8 @@ public final class AndroidWeatherSpeech {
             utterance = id;
             Bundle params = new Bundle();
             params.putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC);
+            if(WeatherSpeechPreferences.backend(context)==WeatherSpeechPreferences.KOKORO)params.putInt("weather_voice_sid",WeatherNeuralSpeechModels.voice(context));
+            if(WeatherSpeechPreferences.backend(context)==WeatherSpeechPreferences.TIBAO)params.putInt("weather_tibao_preset",WeatherTibaoModels.preset(context));
             if (engine.speak(text, TextToSpeech.QUEUE_FLUSH, params, id) != TextToSpeech.SUCCESS) {
                 ready = false; ended(id, true); releaseEngine();
                 reply.error("tts_speak_failed", "System speech rejected the narration"); return;
@@ -186,7 +195,9 @@ public final class AndroidWeatherSpeech {
                 try { engine.stop(); } catch (RuntimeException ignored) {}
                 ended(id, true);
             } };
-            main.postDelayed(startTimeout, 15000);
+            // Large local weights may take longer on first synthesis on older CPUs.
+            // Binding remains fast because the private service loads them lazily.
+            main.postDelayed(startTimeout, WeatherSpeechPreferences.local(context)?90000:15000);
             reply.success(null);
             Log.i(TAG, "Narration queued, characters=" + text.length());
         } catch (RuntimeException error) {

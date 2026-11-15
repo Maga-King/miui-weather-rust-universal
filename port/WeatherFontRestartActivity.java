@@ -14,7 +14,8 @@ public final class WeatherFontRestartActivity extends Activity {
         super.onCreate(state);setContentView(new FrameLayout(this));splash.onFirstFrame();
         new Handler(Looper.getMainLooper()).postDelayed(()->{
             Intent launch=getPackageManager().getLaunchIntentForPackage(getPackageName());
-            if(launch!=null)startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TASK).putExtra("open_route","/settings"));
+            String route=getIntent().getStringExtra("weather_restart_route");
+            if(launch!=null)startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TASK).putExtra("open_route",route==null?"/settings":route));
             finishAndRemoveTask();
         },650);
     }

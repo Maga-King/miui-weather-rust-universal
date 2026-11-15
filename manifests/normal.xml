@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="dev.weather.oneplus" android:versionCode="2" android:versionName="18.0.0.27-normal">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="dev.weather.oneplus" android:versionCode="10400" android:versionName="18.0.0.27-normal-v1.4.0">
   <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="36" />
   <queries>
     <intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>
@@ -30,10 +30,16 @@
     <receiver android:name="dev.weather.oneplus.WeatherOxygenRpkMicroWidgetProvider" android:label="@string/weather_oxygen_rpk_micro_name" android:exported="false"><intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter><meta-data android:name="android.appwidget.provider" android:resource="@xml/weather_oxygen_rpk_micro_info" /></receiver>
     <receiver android:name="dev.weather.oneplus.WeatherOxygenRpkStripWidgetProvider" android:label="@string/weather_oxygen_rpk_strip_name" android:exported="false"><intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter><meta-data android:name="android.appwidget.provider" android:resource="@xml/weather_oxygen_rpk_strip_info" /></receiver>
     <receiver android:name="dev.weather.oneplus.WeatherOxygenRpkTodayWidgetProvider" android:label="@string/weather_oxygen_rpk_today_name" android:exported="false"><intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter><meta-data android:name="android.appwidget.provider" android:resource="@xml/weather_oxygen_rpk_today_info" /></receiver>
+    <activity android:name="dev.weather.oneplus.WeatherBackgroundSettingsActivity" android:exported="false" android:screenOrientation="portrait" />
     <meta-data android:name="dev.weather.oneplus.WEATHER_REFRESH_SOURCE" android:value="dev.weather.oneplus.XiaomiWeatherRefreshSource" />
     <activity android:name="dev.weather.oneplus.WeatherWidgetConfigureActivity" android:exported="true" android:screenOrientation="portrait"><intent-filter><action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" /></intent-filter></activity>
     <activity android:name="dev.weather.oneplus.WeatherWidgetManagementActivity" android:exported="false" android:screenOrientation="portrait" />
     <activity android:name="dev.weather.oneplus.WeatherAppearanceActivity" android:exported="false" android:screenOrientation="portrait" />
+    <activity android:name="dev.weather.oneplus.WeatherSpeechSettingsActivity" android:exported="false" android:screenOrientation="portrait" />
+    <service android:name="dev.weather.oneplus.WeatherNeuralSpeechService" android:exported="false" android:process=":weather_speech" android:label="@string/weather_neural_speech_name">
+      <intent-filter><action android:name="android.intent.action.TTS_SERVICE" /><category android:name="android.intent.category.DEFAULT" /></intent-filter>
+      <meta-data android:name="android.speech.tts" android:resource="@xml/weather_neural_tts_engine" />
+    </service>
     <activity android:name="dev.weather.oneplus.WeatherFontRestartActivity" android:exported="false" android:process=":font_restart" android:taskAffinity="dev.weather.oneplus.font_restart" android:excludeFromRecents="true" android:theme="@style/WeatherStartingTheme" />
     <activity android:name="dev.weather.oneplus.WeatherWebActivity" android:exported="false" android:screenOrientation="portrait" android:theme="@android:style/Theme.Material.Light.NoActionBar" />
     <activity android:name="dev.weather.oneplus.OriginalRainActivity" android:exported="false" android:screenOrientation="portrait" />

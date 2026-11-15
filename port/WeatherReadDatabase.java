@@ -13,11 +13,18 @@ final class WeatherReadDatabase implements AutoCloseable {
     private final Uri uri;
 
     static WeatherReadDatabase open(Context context) {
-        return new WeatherReadDatabase(context);
+        return open(context, WeatherSources.current(context));
     }
 
-    private WeatherReadDatabase(Context context) {
-        uri = Uri.parse("content://" + context.getPackageName() + ".weatherdb/query");
+    static WeatherReadDatabase open(Context context, WeatherSourceSession session) {
+        return new WeatherReadDatabase(context, session);
+    }
+
+    private WeatherReadDatabase(Context context, WeatherSourceSession session) {
+        // Pin the namespace for this client's lifetime. The provider process may
+        // survive the engine restart and must not consult cached preferences.
+        uri = Uri.parse("content://" + context.getPackageName() + ".weatherdb/query?source="
+                + Uri.encode(session.sourceId));
         client = context.getContentResolver().acquireContentProviderClient(uri);
         if (client == null) throw new SQLiteException("Weather database reader unavailable");
     }

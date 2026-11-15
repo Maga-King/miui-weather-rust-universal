@@ -16,26 +16,42 @@ public final class WeatherWidgetPreferences {
     public static String cityId(Context c, int id) { return prefs(c).getString(key(id,"city"), ""); }
     public static String secondCityId(Context c, int id) { return prefs(c).getString(key(id,"second"), ""); }
     public static int panel(Context c, int id) { return Math.max(0,Math.min(3,prefs(c).getInt(key(id,"panel"),0))); }
+    public static boolean sizeEditing(Context c,int id) { return prefs(c).getBoolean(key(id,"size_editing"),false); }
+    public static int savedWidthPercent(Context c,int id) { return WeatherWidgetGeometry.clamp(prefs(c).getInt(key(id,"width_percent"),100)); }
+    public static int savedHeightPercent(Context c,int id) { return WeatherWidgetGeometry.clamp(prefs(c).getInt(key(id,"height_percent"),100)); }
+    public static int widthPercent(Context c,int id) { return sizeEditing(c,id)?savedWidthPercent(c,id):100; }
+    public static int heightPercent(Context c,int id) { return sizeEditing(c,id)?savedHeightPercent(c,id):100; }
     public static boolean save(Context c,int id,String city,String second,int panel) {
         if(id==AppWidgetManager.INVALID_APPWIDGET_ID || panel<0 || panel>3 || city==null || second==null) return false;
         return prefs(c).edit().putString(key(id,"city"),city).putString(key(id,"second"),second)
                 .putInt(key(id,"panel"),panel).commit();
     }
+    public static boolean save(Context c,int id,String city,String second,int panel,
+            boolean sizeEditing,int widthPercent,int heightPercent) {
+        if(id==AppWidgetManager.INVALID_APPWIDGET_ID||panel<0||panel>3||city==null||second==null
+                ||widthPercent<WeatherWidgetGeometry.MIN||widthPercent>WeatherWidgetGeometry.MAX
+                ||heightPercent<WeatherWidgetGeometry.MIN||heightPercent>WeatherWidgetGeometry.MAX)return false;
+        return prefs(c).edit().putString(key(id,"city"),city).putString(key(id,"second"),second)
+                .putInt(key(id,"panel"),panel).putBoolean(key(id,"size_editing"),sizeEditing)
+                .putInt(key(id,"width_percent"),widthPercent).putInt(key(id,"height_percent"),heightPercent).commit();
+    }
     public static void delete(Context c,int id) {
-        prefs(c).edit().remove(key(id,"city")).remove(key(id,"second")).remove(key(id,"panel")).apply();
+        prefs(c).edit().remove(key(id,"city")).remove(key(id,"second")).remove(key(id,"panel"))
+                .remove(key(id,"size_editing")).remove(key(id,"width_percent")).remove(key(id,"height_percent")).apply();
     }
     /** Includes real saved cities without weather, so missing observations remain distinguishable. */
     public static JSONArray cities(Context c) {
         JSONArray out=new JSONArray();
-        if(!c.getDatabasePath("weather.db").isFile())return out;
-        try(WeatherReadDatabase db=WeatherReadDatabase.open(c);
+        WeatherSourceSession session=WeatherSources.current(c);
+        if(!WeatherSources.isCurrent(c,session)||!WeatherSources.database(c,session.sourceId).isFile())return out;
+        try(WeatherReadDatabase db=WeatherReadDatabase.open(c,session);
             Cursor rows=db.rawQuery("SELECT posID,name,flag FROM selectedcity ORDER BY position ASC,flag DESC",null)) {
             while(rows.moveToNext()) {
                 String id=rows.isNull(0)?"":rows.getString(0), name=rows.isNull(1)?"":rows.getString(1);
                 if(!id.isEmpty())out.put(new JSONObject().put("cityId",id).put("cityName",name).put("located",rows.getInt(2)==1));
             }
         }catch(Exception ignored){}
-        return out;
+        return WeatherSources.isCurrent(c,session)?out:new JSONArray();
     }
     /** Port default for dual-city cards: actual located selection, otherwise first saved city. */
     public static String defaultCityId(Context c,boolean preferLocated) {

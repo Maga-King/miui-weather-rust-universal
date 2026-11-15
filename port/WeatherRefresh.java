@@ -98,8 +98,15 @@ public final class WeatherRefresh {
      * a newer snapshot is successful and must not trigger a cache-write retry.
      */
     public static synchronized boolean publishNetworkSuccess(Context context, WeatherWidgetData observation) {
+        WeatherSourceSession session=WeatherSources.current(context);
+        if(!session.xiaomi())return false;
+        return publishNetworkSuccess(context,observation,session);
+    }
+    public static boolean publishNetworkSuccess(Context context,WeatherWidgetData observation,WeatherSourceSession session) {
+        synchronized(WeatherSources.LOCK) {
+        if(!WeatherSources.isCurrent(context,session))return false;
         if (!networkAllowed(context) || observation == null) return false;
-        WeatherWidgetCache.WriteResult result = WeatherWidgetCache.publish(context, observation);
+        WeatherWidgetCache.WriteResult result = WeatherWidgetCache.publish(context, observation,session);
         SharedPreferences.Editor update = state(context).edit()
             .putLong("last_success_ms", now())
             .putString("success_city_id", observation.cityId)
@@ -111,6 +118,7 @@ public final class WeatherRefresh {
         }
         boolean recorded = update.commit();
         return recorded && result != WeatherWidgetCache.WriteResult.FAILED;
+        }
     }
     /** A normal in-app manual refresh entry point. No widget button or exact alarm. */
     public static boolean requestManual(Context context) {
@@ -183,7 +191,10 @@ public final class WeatherRefresh {
     }
     static boolean manual(android.app.job.JobParameters parameters) { return parameters.getExtras().getBoolean(MANUAL, false); }
     static boolean automaticCurrent(Context context, android.app.job.JobParameters parameters) {
-        return manual(parameters) || parameters.getExtras().getLong(AUTO_EPOCH, 0) == state(context).getLong(AUTO_EPOCH, 0);
+        WeatherSourceSession session=WeatherSources.current(context);
+        boolean source=WeatherSources.isCurrent(context,session)&&session.sourceId.equals(parameters.getExtras().getString("weather_source","xiaomi"))
+            &&session.epoch==parameters.getExtras().getLong("weather_source_epoch",0);
+        return source&&(manual(parameters) || parameters.getExtras().getLong(AUTO_EPOCH, 0) == state(context).getLong(AUTO_EPOCH, 0));
     }
     static long earliest(android.app.job.JobParameters parameters) { return parameters.getExtras().getLong(EARLIEST, 0); }
     static long automaticDelay(Context context, long earliest) { return Math.max(0, automaticTime(context, earliest) - now()); }
@@ -192,6 +203,9 @@ public final class WeatherRefresh {
         if (scheduler == null || !ready(context)) return false;
         long due = manual ? earliest : automaticTime(context, earliest);
         PersistableBundle extras = new PersistableBundle();
+        WeatherSourceSession session=WeatherSources.current(context);
+        if(!WeatherSources.isCurrent(context,session))return false;
+        extras.putString("weather_source",session.sourceId);extras.putLong("weather_source_epoch",session.epoch);
         extras.putBoolean(MANUAL, manual); extras.putBoolean(CHARGING, charging);
         if (!manual) extras.putLong(AUTO_EPOCH, state(context).getLong(AUTO_EPOCH, 0));
         extras.putLong(EARLIEST, earliest); extras.putLong("due_ms", due); extras.putInt("policy_version", POLICY_VERSION);
@@ -348,6 +362,7 @@ public final class WeatherRefresh {
         }
     }
     private static boolean ready(Context context) {
+        if(!WeatherSources.isCurrent(context,WeatherSources.current(context)))return false;
         if (!networkAllowed(context)) { blocked(context, "network_consent_required"); return false; }
         if (sourceClass(context).isEmpty()) { blocked(context, "source_not_configured"); return false; }
         return true;

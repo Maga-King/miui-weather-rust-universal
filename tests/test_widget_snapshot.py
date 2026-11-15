@@ -161,6 +161,12 @@ public class SnapshotTest {
 }
 
 def main():
+    from fixtures.weather_source_fakes import SOURCE_STUBS, ALERT_STATE_STUB, source_read_overload, source_raw_overload, source_city_identity
+    SOURCES.update(SOURCE_STUBS)
+    SOURCES['dev/weather/oneplus/WeatherAlerts.java'] = ALERT_STATE_STUB
+    SOURCES['dev/weather/oneplus/WeatherReadDatabase.java'] = source_read_overload(SOURCES['dev/weather/oneplus/WeatherReadDatabase.java'])
+    SOURCES['dev/weather/oneplus/WeatherWidgetCityCache.java'] = source_raw_overload(SOURCES['dev/weather/oneplus/WeatherWidgetCityCache.java'])
+    SOURCES['dev/weather/oneplus/WeatherDatabaseBridge.java'] = source_city_identity(SOURCES['dev/weather/oneplus/WeatherDatabaseBridge.java'])
     parser = argparse.ArgumentParser()
     parser.add_argument('--json-jar', type=Path, required=True)
     args = parser.parse_args()

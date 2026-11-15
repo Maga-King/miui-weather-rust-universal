@@ -1,0 +1,23 @@
+Chinese RoBERTa whole-word-masking vocabulary
+
+Source model card: https://huggingface.co/hfl/chinese-roberta-wwm-ext-large
+Source project: https://github.com/ymcui/Chinese-BERT-wwm
+License declared by source model card: Apache License 2.0.
+Complete license: APACHE-LICENSE in this directory.
+
+The source repository is based on https://github.com/google-research/bert.
+The APK uses the WordPiece vocabulary through the shared Genie tokenizer.
+The large RoBERTa ONNX model is external to the APK.
+
+Resource authors credited by the model card:
+Yiming Cui, Wanxiang Che, Ting Liu, Bing Qin, Ziqing Yang, Shijin Wang,
+Guoping Hu.
+
+Primary resource publication:
+Cui et al. (2020), Revisiting Pre-Trained Models for Chinese Natural Language
+Processing, Findings of the Association for Computational Linguistics: EMNLP
+2020, pages 657--668. https://aclanthology.org/2020.findings-emnlp.58/
+
+Secondary resource publication:
+Pre-Training with Whole Word Masking for Chinese BERT.
+https://arxiv.org/abs/1906.08101

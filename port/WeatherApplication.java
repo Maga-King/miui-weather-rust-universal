@@ -6,9 +6,12 @@ import android.app.Application;
 public final class WeatherApplication extends Application {
     @Override public void onCreate() {
         super.onCreate();
+        WeatherSources.current(this);
         WeatherFonts.install(this);
         WeatherRenderPreferences.install(this);
+        WeatherSystemBars.install(this);
         if (getPackageName().equals(Application.getProcessName())) {
+            WeatherSources.restoreOriginal(this);
             WeatherWidgetEvents.register(this);
             WeatherAlerts.ensureScheduled(this);
             WeatherRefresh.ensureScheduled(this);

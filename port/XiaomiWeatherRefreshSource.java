@@ -15,7 +15,7 @@ import javax.net.ssl.HttpsURLConnection;
 import org.json.JSONObject;
 
 /** Official Xiaomi endpoint used by both original Weather 17 Java and Weather 18 Dart. */
-public final class XiaomiWeatherRefreshSource implements WeatherRefreshSource {
+public final class XiaomiWeatherRefreshSource implements WeatherCityRefreshSource {
     private static final String ENDPOINT="https://weatherapi.market.xiaomi.com/wtr-v3/weather/all";
     private static final int MAX_BYTES=2*1024*1024;
     public XiaomiWeatherRefreshSource() {}
@@ -33,11 +33,11 @@ public final class XiaomiWeatherRefreshSource implements WeatherRefreshSource {
     }
 
     /** Widget requests use their real saved identity, never the primary notification city. */
-    Result fetchCity(Context context, WeatherDatabaseBridge.City city,
+    public Result fetchCity(Context context, WeatherDatabaseBridge.City city,
             CancellationSignal cancellation) throws Exception {
         return fetchCity(context,city,cancellation,Long.MAX_VALUE);
     }
-    Result fetchCity(Context context, WeatherDatabaseBridge.City city,
+    public Result fetchCity(Context context, WeatherDatabaseBridge.City city,
             CancellationSignal cancellation,long deadlineElapsed) throws Exception {
         cancellation.throwIfCanceled();
         if (!WeatherRefresh.networkAllowed(context)) return Result.blocked("network_consent_required");

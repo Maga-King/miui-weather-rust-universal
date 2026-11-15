@@ -22,20 +22,26 @@ public final class WeatherDatabaseBridge {
 
     /** Cheap existence check only; never parse forecasts on the startup thread. */
     static boolean hasCachedWeather(Context context) {
-        if(!context.getDatabasePath("weather.db").isFile())return false;
-        try(WeatherReadDatabase db=WeatherReadDatabase.open(context);
+        WeatherSourceSession session = WeatherSources.current(context);
+        if(!WeatherSources.isCurrent(context,session)||!WeatherSources.database(context,session.sourceId).isFile())return false;
+        try(WeatherReadDatabase db=WeatherReadDatabase.open(context,session);
             Cursor rows=db.rawQuery(HAS_CACHED_WEATHER_QUERY,null)){
-            return rows.moveToFirst();
+            return rows.moveToFirst()&&WeatherSources.isCurrent(context,session);
         }catch(SQLiteException error){return false;}
     }
 
     /** False only when the database is absent or a successful query confirms no city. */
     public static boolean hasSelectedCity(Context context) {
-        File file = context.getDatabasePath("weather.db");
+        return hasSelectedCity(context,WeatherSources.current(context));
+    }
+
+    static boolean hasSelectedCity(Context context,WeatherSourceSession session) {
+        if(!WeatherSources.isCurrent(context,session))return true;
+        File file = WeatherSources.database(context,session.sourceId);
         if (!file.isFile()) return false;
-        try (WeatherReadDatabase db = WeatherReadDatabase.open(context);
+        try (WeatherReadDatabase db = WeatherReadDatabase.open(context,session);
              Cursor rows = db.rawQuery("SELECT 1 FROM selectedcity LIMIT 1", null)) {
-            return rows.moveToFirst();
+            return rows.moveToFirst()||!WeatherSources.isCurrent(context,session);
         } catch (SQLiteException error) {
             // A busy/migrating database must not unexpectedly redirect the user to search.
             Log.w("WeatherDatabase", "Cannot check selected city: " + error.getClass().getSimpleName());
@@ -45,37 +51,52 @@ public final class WeatherDatabaseBridge {
 
     /** First city uses the app's position ordering; HTTP locationKey is extra, not posID. */
     static City firstCity(Context context) {
-        File file = context.getDatabasePath("weather.db");
+        return firstCity(context,WeatherSources.current(context));
+    }
+
+    static City firstCity(Context context,WeatherSourceSession session) {
+        if(!WeatherSources.isCurrent(context,session))return null;
+        File file = WeatherSources.database(context,session.sourceId);
         if (!file.isFile()) return null;
-        try (WeatherReadDatabase db = WeatherReadDatabase.open(context);
+        try (WeatherReadDatabase db = WeatherReadDatabase.open(context,session);
              Cursor row = db.rawQuery("SELECT posID,name,extra,latitude,longtitude,flag,locale "
                      + "FROM selectedcity ORDER BY position ASC, flag DESC LIMIT 1", null)) {
             if (!row.moveToFirst()) return null;
             Locale locale = context.getResources().getConfiguration().getLocales().get(0);
-            return new City(text(row, 0), text(row, 1), text(row, 2), text(row, 3),
+            City city = new City(text(row, 0), text(row, 1), text(row, 2), text(row, 3),
                     text(row, 4), row.getInt(5) == 1, locale.toString(), temperatureUnit(context));
+            return WeatherSources.isCurrent(context,session)?city:null;
         }
     }
 
     /** Saved identities in original ordering; never substitutes another city for a missing ID. */
     static List<City> selectedCities(Context context) {
+        return selectedCities(context,WeatherSources.current(context));
+    }
+
+    static List<City> selectedCities(Context context,WeatherSourceSession session) {
         List<City> cities = new ArrayList<>();
-        File file = context.getDatabasePath("weather.db");
+        if(!WeatherSources.isCurrent(context,session))return cities;
+        File file = WeatherSources.database(context,session.sourceId);
         if (!file.isFile()) return cities;
         String locale = context.getResources().getConfiguration().getLocales().get(0).toString();
         String unit = temperatureUnit(context);
-        try (WeatherReadDatabase db = WeatherReadDatabase.open(context);
+        try (WeatherReadDatabase db = WeatherReadDatabase.open(context,session);
              Cursor row = db.rawQuery("SELECT posID,name,extra,latitude,longtitude,flag,locale "
                      + "FROM selectedcity ORDER BY position ASC, flag DESC", null)) {
             while (row.moveToNext()) cities.add(new City(text(row, 0), text(row, 1), text(row, 2),
                     text(row, 3), text(row, 4), row.getInt(5) == 1, locale, unit));
         }
-        return cities;
+        return WeatherSources.isCurrent(context,session)?cities:new ArrayList<>();
     }
 
     static City cityById(Context context, String id) {
+        return cityById(context,id,WeatherSources.current(context));
+    }
+
+    static City cityById(Context context, String id,WeatherSourceSession session) {
         if (id == null || id.isEmpty()) return null;
-        for (City city : selectedCities(context)) if (id.equals(city.id)) return city;
+        for (City city : selectedCities(context,session)) if (id.equals(city.id)) return city;
         return null;
     }
 
@@ -84,10 +105,14 @@ public final class WeatherDatabaseBridge {
      * Import through WeatherWidgetCache.publishCached; this is NOT a network success.
      */
     public static WeatherWidgetData readCached(Context context) {
+        return readCached(context,WeatherSources.current(context));
+    }
+
+    static WeatherWidgetData readCached(Context context,WeatherSourceSession session) {
         try {
-            City city = firstCity(context);
+            City city = firstCity(context,session);
             if (city == null || !city.valid()) return null;
-            try (WeatherReadDatabase db = WeatherReadDatabase.open(context);
+            try (WeatherReadDatabase db = WeatherReadDatabase.open(context,session);
                  Cursor row = db.rawQuery("SELECT data1,minute_rain_data FROM raw WHERE city_id=? LIMIT 1",
                          new String[]{city.id})) {
                 if (!row.moveToFirst() || row.isNull(0)) return null;
@@ -98,8 +123,8 @@ public final class WeatherDatabaseBridge {
                 }
                 WeatherWidgetData observation = XiaomiWeatherParser.parse(data, city.id, city.name,
                         city.unit, city.locale);
-                City current = firstCity(context);
-                return city.sameSelection(current) ? observation : null;
+                City current = firstCity(context,session);
+                return WeatherSources.isCurrent(context,session)&&city.sameSelection(current) ? observation : null;
             }
         } catch (Exception error) {
             Log.w("WeatherDatabase", "Cannot read saved observation: " + error.getClass().getSimpleName());
@@ -153,6 +178,10 @@ public final class WeatherDatabaseBridge {
                     && latitude.equals(other.latitude) && longitude.equals(other.longitude)
                     && located==other.located && name.equals(other.name)
                     && unit.equals(other.unit) && locale.equals(other.locale);
+        }
+        String cacheIdentity() {
+            return new org.json.JSONArray(java.util.Arrays.asList(id,name,locationKey,latitude,
+                    longitude,located,locale,unit)).toString();
         }
     }
 }

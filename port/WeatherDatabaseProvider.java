@@ -12,6 +12,8 @@ import java.io.File;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * System SQLite reads the weather WAL only in :weather_db. The original Dart
@@ -20,7 +22,10 @@ import java.util.Set;
  * when the two libraries do not share SQLite's connection/lock registry.
  */
 public final class WeatherDatabaseProvider extends ContentProvider {
-    private SQLiteDatabase database;
+    // Retain each allowlisted handle: an earlier namespace may still have a live
+    // remote Cursor when the main process switches sources. Never close its DB
+    // underneath that cursor, or redirect subsequent reads to another source.
+    private final Map<String, SQLiteDatabase> databases = new HashMap<>();
     private static final Set<String> QUERIES = new HashSet<>(Arrays.asList(
         WeatherDatabaseBridge.HAS_CACHED_WEATHER_QUERY,
         "SELECT 1 FROM selectedcity LIMIT 1",
@@ -28,6 +33,7 @@ public final class WeatherDatabaseProvider extends ContentProvider {
         "SELECT posID,name,extra,latitude,longtitude,flag,locale FROM selectedcity ORDER BY position ASC, flag DESC",
         "SELECT posID,name,extra,latitude,longtitude,flag FROM selectedcity ORDER BY position ASC,flag DESC",
         "SELECT posID,name,flag FROM selectedcity ORDER BY position ASC,flag DESC",
+        "SELECT posID,flag,position,name,street_name,longtitude,latitude,belongings,extra,locale FROM selectedcity ORDER BY position ASC,flag DESC",
         "SELECT data1,minute_rain_data FROM raw WHERE city_id=? LIMIT 1",
         "SELECT data1 FROM raw WHERE city_id=? LIMIT 1"
     ));
@@ -39,15 +45,17 @@ public final class WeatherDatabaseProvider extends ContentProvider {
         return true;
     }
 
-    private synchronized SQLiteDatabase database() {
+    private synchronized SQLiteDatabase database(String sourceId) {
+        File file = WeatherSources.database(getContext(), sourceId);
+        SQLiteDatabase database = databases.get(sourceId);
         if (database != null && database.isOpen()) return database;
-        File file = getContext().getDatabasePath("weather.db");
         if (!file.isFile()) throw new SQLiteException("Weather database is not ready");
         // Do not let Android's default corruption handler delete the original
         // engine's database. Preserve it and let the existing callers defer.
         database = SQLiteDatabase.openDatabase(file.getAbsolutePath(), null,
             SQLiteDatabase.OPEN_READONLY | SQLiteDatabase.NO_LOCALIZED_COLLATORS,
             db -> Log.e("WeatherDatabase", "Read-only database error; original files preserved"));
+        databases.put(sourceId, database);
         return database;
     }
 
@@ -59,7 +67,11 @@ public final class WeatherDatabaseProvider extends ContentProvider {
         int expected = sql.contains("?") ? 1 : 0;
         if ((args == null ? 0 : args.length) != expected)
             throw new IllegalArgumentException("Invalid weather database arguments");
-        return database().rawQuery(sql, args);
+        String sourceId = uri.getQueryParameter("source");
+        // Legacy callers are Xiaomi readers. Explicit namespaces are resolved
+        // only through the source registry's fixed filenames, never a URI path.
+        if (sourceId == null) sourceId = "xiaomi";
+        return database(sourceId).rawQuery(sql, args);
     }
 
     @Override public String getType(Uri uri) { return "vnd.android.cursor.dir/vnd.weather.readonly"; }

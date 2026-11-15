@@ -148,8 +148,14 @@ public final class AndroidIntentBridge {
         if (component != null && "com.android.settings.Settings$LocationSettingsActivity".equals(component.getClassName()))
             return new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS);
         String action = intent.getAction();
-        if (Settings.ACTION_APPLICATION_DETAILS_SETTINGS.equals(action))
-            return new Intent(action, Uri.fromParts("package", activity.getPackageName(), null));
+        // Covers JSON-string Intent input and package-manager availability calls
+        // which do not pass through AndroidConsent's Map-shaped handler.
+        if (Settings.ACTION_APPLICATION_DETAILS_SETTINGS.equals(action)
+                || "miui.intent.action.APP_PERM_EDITOR".equals(action)
+                || "android.intent.action.MANAGE_APP_PERMISSIONS".equals(action)
+                || "android.intent.action.MANAGE_APP_PERMISSION".equals(action))
+            return new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.fromParts("package", activity.getPackageName(), null));
         if (Settings.ACTION_APP_NOTIFICATION_SETTINGS.equals(action))
             return new Intent(action).putExtra(Settings.EXTRA_APP_PACKAGE, activity.getPackageName());
         String url = AndroidWeatherPages.webUrl(intent.getDataString());

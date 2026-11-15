@@ -20,6 +20,8 @@ public final class WeatherWidgetManagementActivity extends WeatherWidgetSettings
     @Override public void onResume() {
         super.onResume();setTitle(chinese?"管理小组件":"Manage widgets");
         LinearLayout list=page();refreshInterval(list);
+        link(list,chinese?"后台更新与通知":"Background updates and notifications",chinese?"查看后台状态与系统权限":"Background status and system permissions",
+                ()->startActivity(new Intent(this,WeatherBackgroundSettingsActivity.class)));
         AppWidgetManager manager=AppWidgetManager.getInstance(this);
         ArrayList<Integer> instances=new ArrayList<>();
         for(Class<?> provider:WeatherWidgetCatalog.PROVIDERS) {

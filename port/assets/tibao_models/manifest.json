@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "model_version": "tribbie-v2proplus-userclip-eos-13-19-20-v1",
+  "default_preset": 13,
+  "presets": [
+    13,
+    19,
+    20
+  ],
+  "sample_rate": 32000,
+  "byte_order": "little",
+  "expanded_bytes": 1172246964,
+  "files": [
+    {
+      "file": "bert.onnx",
+      "bytes": 598977160,
+      "sha256": "a1903ece48e4f119e8b12cf38429999f81c043eaba8978508ddf5964409cb392"
+    },
+    {
+      "file": "ref.ge.bin",
+      "bytes": 4096,
+      "sha256": "05ef6bb4ab162d4c15bb863c8a4d2b5af7374874eb38bddfdbe5384a08e4780d"
+    },
+    {
+      "file": "ref.ge_advanced.bin",
+      "bytes": 2048,
+      "sha256": "d2a8417008e99686af41b6a2238a9e0f62935df1efae36ee99db66b4e4589cbe"
+    },
+    {
+      "file": "ref.ref_bert.bin",
+      "bytes": 102400,
+      "sha256": "8d15891136b7f9afae16a34d33785789e5d83d370b79cc1a43a4dcbab8b6cc85"
+    },
+    {
+      "file": "ref.ref_seq.bin",
+      "bytes": 200,
+      "sha256": "b9784c215c69f876b4ca2696d1c336b2958b9ce73d0ff191d298966d244f90b3"
+    },
+    {
+      "file": "ref.ssl_content.bin",
+      "bytes": 488448,
+      "sha256": "809ee49c4d29b8bdb948907f8ef3ac2eb17b25701172777e0560cc1ae2049f95"
+    },
+    {
+      "file": "reference.json",
+      "bytes": 1380,
+      "sha256": "0f89f23bad46685977ed0b99f9972db088fa28f8a4887d621a38a634203463bb"
+    },
+    {
+      "file": "t2s_encoder.onnx",
+      "bytes": 14568,
+      "sha256": "f6eb1acd47c8e6d36b777886981a49122e8e070a5eb9888d458fb188dc139f75"
+    },
+    {
+      "file": "t2s_encoder_fp32.bin",
+      "bytes": 11465732,
+      "sha256": "53f823ea93ceeead643bbaad13b182136e966cddaeeab6f9d2ae21e6c215f91f"
+    },
+    {
+      "file": "t2s_first.onnx",
+      "bytes": 418659,
+      "sha256": "9b2fa45e12866dc986c87f4ec48550a2961c83b95b0076800f8ca9deda26bb52"
+    },
+    {
+      "file": "t2s_shared_fp32.bin",
+      "bytes": 306827268,
+      "sha256": "21010b4c59df226f17b84e63e681f302df6eb234fc2e3647eb3d33b8c1a89d18"
+    },
+    {
+      "file": "t2s_stage.onnx",
+      "bytes": 419615,
+      "sha256": "772bb4cc109057d3f2f8ab5b6312c138a1d0ed7dfb100ba781183fa62753d6f3"
+    },
+    {
+      "file": "vits_13.onnx",
+      "bytes": 1611226,
+      "sha256": "79525391ac6c52b50c4a397791da810f520047751d12521c5bc261ac5f334716"
+    },
+    {
+      "file": "vits_19.onnx",
+      "bytes": 1611226,
+      "sha256": "53c59a3c993d1f9eb57976368b0efa9b767692bcc4d8eedc8e7df6c69908556f"
+    },
+    {
+      "file": "vits_20.onnx",
+      "bytes": 1611226,
+      "sha256": "b306180de83220219671e74d98584eb01dfab51679c4a235e35fd27fc6c5fb95"
+    },
+    {
+      "file": "vits_fp32.bin",
+      "bytes": 248691712,
+      "sha256": "d14078c19d8f08df233f5b569e215e3bf51a9fa4c2d8610a818f0e3a3a6dcf69"
+    }
+  ],
+  "private_import_only": true,
+  "source_archive_sha256": "2aea4121718efc1f612a10fc873b839330dfbcffc2277bb9c6f758ebeaf823b7",
+  "attribution": "AI Hobbyist: 红血球AE3803、白菜工厂1145号员工; voice rights: 米哈游; CC-BY-NC 4.0, author prohibits redistribution"
+}

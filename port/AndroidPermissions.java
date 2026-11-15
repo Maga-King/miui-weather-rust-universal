@@ -2,7 +2,6 @@ package dev.weather.oneplus;
 
 import android.Manifest;
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.app.NotificationManager;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
@@ -12,8 +11,10 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.provider.Settings;
 import android.util.Log;
+import android.widget.Toast;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -39,7 +40,10 @@ public final class AndroidPermissions {
     private static final String NOTIFICATIONS = Manifest.permission.POST_NOTIFICATIONS;
     // Private Android request codes; Dart's request_code is preserved separately.
     private static final int RUNTIME_REQUEST = 0x5741;
-    private static final int SETTINGS_REQUEST = 0x5742;
+    private static final int BACKGROUND_REQUEST_FIRST = 0x5800;
+    private static final int BACKGROUND_REQUEST_LAST = 0x6fff;
+    private static final long BACKGROUND_WAIT_MS = 3000;
+    private static int nextBackgroundRequest = BACKGROUND_REQUEST_FIRST;
 
     public interface EventSink {
         /** Send a method call, using the permission channel's method codec. */
@@ -53,11 +57,13 @@ public final class AndroidPermissions {
     private final ArrayDeque<Request> queue = new ArrayDeque<>();
     private final Set<String> declared = new HashSet<>();
     private Request current;
-    private AlertDialog explanation;
     private boolean resumed;
     private boolean waitingForRuntime;
-    private boolean waitingForSettings;
-    private boolean settingsActivityPaused;
+    private boolean backgroundPending;
+    private boolean backgroundUiObserved;
+    private int backgroundRequestCode;
+    private long backgroundDeadline;
+    private Runnable backgroundCheck;
     private boolean destroyed;
 
     private static final class Request {
@@ -196,7 +202,7 @@ public final class AndroidPermissions {
 
     private void advance() {
         if (current == null || destroyed || !resumed || waitingForRuntime
-                || waitingForSettings || explanation != null) return;
+                || backgroundPending) return;
         if (activity.isFinishing() || activity.isDestroyed()) {
             finish();
             return;
@@ -230,21 +236,8 @@ public final class AndroidPermissions {
         if (!current.backgroundAttempted && current.permissions.contains(BACKGROUND)
                 && shouldRequest(BACKGROUND) && hasForegroundLocation()) {
             current.backgroundAttempted = true;
-            if (Build.VERSION.SDK_INT >= 30) {
-                // With targetSdk >= 30 Android no longer offers "Allow all the
-                // time" in the runtime dialog. A background-only request can
-                // return denied immediately with no UI; explain the Settings step.
-                Log.i(TAG, "Background location requires the system Settings grant");
-                showBackgroundExplanation();
-                return;
-            } else if (Build.VERSION.SDK_INT >= 29) {
-                try {
-                    waitingForRuntime = true;
-                    activity.requestPermissions(new String[]{BACKGROUND}, RUNTIME_REQUEST);
-                } catch (RuntimeException error) {
-                    Log.w(TAG, "Background permission request failed", error);
-                    finish();
-                }
+            if (Build.VERSION.SDK_INT >= 29) {
+                requestBackground();
                 return;
             }
         }
@@ -266,40 +259,86 @@ public final class AndroidPermissions {
         }
     }
 
-    private void showBackgroundExplanation() {
-        CharSequence option = activity.getPackageManager().getBackgroundPermissionOptionLabel();
-        explanation = new AlertDialog.Builder(activity)
-                .setTitle("允许后台定位")
-                .setMessage("天气请求在应用关闭后获取位置，以更新当前位置的天气。"
-                        + "如需开启，请在系统应用设置的定位权限中选择“" + option
-                        + "”。你也可以选择暂不开启。")
-                .setPositiveButton("前往系统设置", (dialog, which) -> {
-                    explanation = null;
-                    waitingForSettings = true;
-                    settingsActivityPaused = false;
-                    try {
-                        activity.startActivityForResult(applicationSettingsIntent(), SETTINGS_REQUEST);
-                    } catch (RuntimeException error) {
-                        waitingForSettings = false;
-                        Log.w(TAG, "Cannot open application settings", error);
-                        finish();
-                    }
-                })
-                .setNegativeButton("暂不开启", (dialog, which) -> {
-                    explanation = null;
-                    finish();
-                })
-                .setOnCancelListener(dialog -> {
-                    explanation = null;
-                    finish();
-                })
-                .create();
-        explanation.show();
+    private static synchronized int allocateBackgroundRequestCode() {
+        int result = nextBackgroundRequest++;
+        if (nextBackgroundRequest > BACKGROUND_REQUEST_LAST) nextBackgroundRequest = BACKGROUND_REQUEST_FIRST;
+        return result;
+    }
+
+    private void requestBackground() {
+        backgroundRequestCode = allocateBackgroundRequestCode();
+        backgroundPending = true;
+        backgroundUiObserved = false;
+        backgroundDeadline = SystemClock.uptimeMillis() + BACKGROUND_WAIT_MS;
+        waitingForRuntime = true;
+        try {
+            // On Android 11+ PermissionController can open its location permission
+            // page itself. NO_UI_SETTINGS_REDIRECT does not mean there is no UI.
+            // Keep foreground and background separate on every ROM, including MIUI.
+            Log.i(TAG, "Requesting system background location code=" + backgroundRequestCode);
+            activity.requestPermissions(new String[]{BACKGROUND}, backgroundRequestCode);
+        } catch (RuntimeException error) {
+            waitingForRuntime = false;
+            Log.w(TAG, "System background permission request failed", error);
+        }
+        scheduleBackgroundCheck();
+    }
+
+    private void scheduleBackgroundCheck() {
+        if (backgroundCheck != null) main.removeCallbacks(backgroundCheck);
+        backgroundCheck = null;
+        if (!backgroundPending || destroyed || !resumed || !activity.hasWindowFocus()) return;
+        final Request request = current;
+        final int code = backgroundRequestCode;
+        backgroundCheck = () -> {
+            backgroundCheck = null;
+            if (destroyed || current != request || !backgroundPending || backgroundRequestCode != code) return;
+            // A permission page/dialog may pause the host or only take its focus.
+            // Never time out a user who is still interacting with that system UI.
+            if (!resumed || !activity.hasWindowFocus()) return;
+            if (activity.isFinishing() || activity.isDestroyed()) { finish(); return; }
+            if (checkPermission(BACKGROUND) != PackageManager.PERMISSION_GRANTED && !backgroundUiObserved) {
+                Toast.makeText(activity, "如果没出现后台定位授权，请在系统设置开启", Toast.LENGTH_LONG).show();
+                Log.i(TAG, "Background permission did not complete in the foreground; continuing without a grant");
+            }
+            clearBackgroundRequest();
+            advance();
+        };
+        main.postDelayed(backgroundCheck, Math.max(0L, backgroundDeadline - SystemClock.uptimeMillis()));
+    }
+
+    private void clearBackgroundRequest() {
+        if (backgroundCheck != null) main.removeCallbacks(backgroundCheck);
+        backgroundCheck = null;
+        backgroundPending = false;
+        backgroundRequestCode = 0;
+        waitingForRuntime = false;
     }
 
     /** Forward Activity.onRequestPermissionsResult. Return true when consumed. */
     public boolean onRequestPermissionsResult(int code, String[] permissions, int[] results) {
+        if (code >= BACKGROUND_REQUEST_FIRST && code <= BACKGROUND_REQUEST_LAST) {
+            // Per-request codes isolate delayed OEM results from subsequent requests.
+            if (destroyed || !backgroundPending || code != backgroundRequestCode) return true;
+            Log.i(TAG, "Background permission result grants=" + Arrays.toString(results));
+            waitingForRuntime = false;
+            boolean cancelled = permissions == null || permissions.length == 0 || results == null || results.length == 0;
+            if (!cancelled && !backgroundUiObserved
+                    && checkPermission(BACKGROUND) != PackageManager.PERMISSION_GRANTED) {
+                // Some controllers silently deny/rate-limit. Keep the original
+                // short delay before continuing and showing the Settings hint.
+                scheduleBackgroundCheck();
+                return true;
+            }
+            clearBackgroundRequest();
+            Request completedStage = current;
+            if (completedStage != null) main.post(() -> {
+                if (current == completedStage) advance();
+            });
+            return true;
+        }
         if (code != RUNTIME_REQUEST) return false;
+        if (destroyed || current == null || backgroundPending || !waitingForRuntime) return true;
         Log.i(TAG, "Runtime permission result names=" + Arrays.toString(permissions)
                 + " grants=" + Arrays.toString(results) + " resumed=" + resumed);
         // Read grants again, including coarse vs. fine, so dismissal is never success.
@@ -311,32 +350,35 @@ public final class AndroidPermissions {
         return true;
     }
 
-    /** Forward Activity.onActivityResult. Android's settings resultCode is not a grant. */
+    /** System permission pages return through onRequestPermissionsResult. */
     public boolean onActivityResult(int requestCode, int resultCode, Intent data) {
-        if (requestCode != SETTINGS_REQUEST) return false;
-        if (waitingForSettings) {
-            waitingForSettings = false;
-            finish();
-        }
-        return true;
+        return false;
     }
 
-    /** Forward Activity.onPause so an initial onResume cannot complete settings early. */
+    /** Pause protects the system permission page from the foreground watchdog. */
     public void onPause() {
         resumed = false;
-        if (waitingForSettings) settingsActivityPaused = true;
+        if (backgroundPending) backgroundUiObserved = true;
+        scheduleBackgroundCheck();
     }
 
-    /** Forward Activity.onResume; supports settings implementations that omit a result. */
+    /** Recover a missing OEM result once the host is back in the foreground. */
     public void onResume() {
         resumed = true;
-        if (waitingForSettings && settingsActivityPaused) {
-            waitingForSettings = false;
-            finish();
-        } else if (current != null) {
-            advance();
-        }
+        if (backgroundPending) {
+            if (backgroundUiObserved) backgroundDeadline = SystemClock.uptimeMillis() + BACKGROUND_WAIT_MS;
+            scheduleBackgroundCheck();
+        } else if (current != null) advance();
         next();
+    }
+
+    /** Window focus is independent of onPause on some system dialogs/multiwindow. */
+    public void onWindowFocusChanged(boolean focused) {
+        if (backgroundPending) {
+            if (!focused) backgroundUiObserved = true;
+            else if (backgroundUiObserved) backgroundDeadline = SystemClock.uptimeMillis() + BACKGROUND_WAIT_MS;
+            scheduleBackgroundCheck();
+        }
     }
 
     /** Forward onDestroy before destroying the native message bridge. */
@@ -345,21 +387,14 @@ public final class AndroidPermissions {
         resumed = false;
         queue.clear();
         current = null;
-        waitingForRuntime = false;
-        waitingForSettings = false;
-        if (explanation != null) {
-            explanation.setOnCancelListener(null);
-            explanation.dismiss();
-            explanation = null;
-        }
+        clearBackgroundRequest();
     }
 
     private void finish() {
         if (destroyed || current == null) return;
         Request completed = current;
         current = null;
-        waitingForRuntime = false;
-        waitingForSettings = false;
+        clearBackgroundRequest();
         if (completed.completion != null) {
             // Defer until the Activity's onResume finishes before starting the
             // location backend. A permission dialog itself pauses that Activity.

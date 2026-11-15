@@ -23,6 +23,8 @@ public final class WeatherWidgetExtendedData {
 
     /** One update batch owns this snapshot; it never survives into the next refresh. */
     static final class Snapshot {
+        private final Context context;
+        final WeatherSourceSession sourceSession;
         final JSONArray cities = new JSONArray();
         final Map<String, WeatherWidgetData> observations = new LinkedHashMap<>();
         final Map<String, JSONObject> raw = new LinkedHashMap<>();
@@ -30,12 +32,19 @@ public final class WeatherWidgetExtendedData {
         String first = "", located = "", locale = "";
         final long now = System.currentTimeMillis();
 
+        Snapshot(Context context,WeatherSourceSession session) {
+            this.context=context;sourceSession=session;
+        }
+        boolean current() {return WeatherSources.isCurrent(context,sourceSession);}
+
         String defaultCity(boolean preferLocated) {
+            if(!current())return "";
             return preferLocated && !located.isEmpty() ? located : first;
         }
-        WeatherWidgetData city(String id) { return observations.get(id); }
+        WeatherWidgetData city(String id) { return current()?observations.get(id):null; }
         JSONObject details(WeatherWidgetData selected) {
             JSONObject out = empty();
+            if(!current())return out;
             try {
                 out.put("cities", cities);
                 if (selected == null || !raw.containsKey(selected.cityId)) return out;
@@ -59,13 +68,17 @@ public final class WeatherWidgetExtendedData {
     }
 
     static Snapshot snapshot(Context context, WeatherWidgetData selected) {
-        Snapshot snapshot = new Snapshot();
+        return snapshot(context,selected,WeatherSources.current(context));
+    }
+    static Snapshot snapshot(Context context,WeatherWidgetData selected,WeatherSourceSession session) {
+        Snapshot snapshot = new Snapshot(context,session);
+        if(!snapshot.current())return snapshot;
         try {
             String unit = WeatherDatabaseBridge.temperatureUnit(context);
             Locale locale = context.getResources().getConfiguration().getLocales().get(0);
             snapshot.locale = locale.toString();
-            if (context.getDatabasePath("weather.db").isFile()) {
-                try (WeatherReadDatabase db = WeatherReadDatabase.open(context);
+            if (WeatherSources.database(context,session.sourceId).isFile()) {
+                try (WeatherReadDatabase db = WeatherReadDatabase.open(context,session);
                      Cursor rows = db.rawQuery("SELECT posID,name,extra,latitude,longtitude,flag "
                              + "FROM selectedcity ORDER BY position ASC,flag DESC", null)) {
                     while (rows.moveToNext()) {
@@ -89,14 +102,14 @@ public final class WeatherWidgetExtendedData {
                         // The background refresh already retains its raw network result for alerts.
                         String identity = id + "\n" + text(rows, 2) + "\n" + text(rows, 3)
                                 + "\n" + text(rows, 4) + "\n" + (rows.getInt(5) == 1);
-                        JSONObject network = cachedNetwork(context, identity);
-                        if (network != null && (raw == null || observed(network) > observed(raw))) raw = network;
-                        // Per-city background responses are already identity/unit checked by the cache.
-                        // Parse this same raw object below, keeping observation and detail fields atomic.
                         WeatherDatabaseBridge.City saved = new WeatherDatabaseBridge.City(id, name,
                                 text(rows, 2), text(rows, 3), text(rows, 4), rows.getInt(5) == 1,
                                 locale.toString(), unit);
-                        JSONObject widgetRaw = WeatherWidgetCityCache.raw(context, saved);
+                        JSONObject network = cachedNetwork(context, identity,saved.cacheIdentity(),session);
+                        if (network != null && (raw == null || observed(network) > observed(raw))) raw = network;
+                        // Per-city background responses are already identity/unit checked by the cache.
+                        // Parse this same raw object below, keeping observation and detail fields atomic.
+                        JSONObject widgetRaw = WeatherWidgetCityCache.raw(context, saved,session);
                         if (widgetRaw != null && (raw == null || observed(widgetRaw) >= observed(raw)))
                             raw = widgetRaw;
                         WeatherWidgetData city = null;
@@ -119,12 +132,18 @@ public final class WeatherWidgetExtendedData {
         } catch (Exception error) {
             Log.w("WeatherWidget", "Extended cached weather unavailable: " + error.getClass().getSimpleName());
         }
+        if(!snapshot.current()) {
+            snapshot.observations.clear();snapshot.raw.clear();
+        }
         return snapshot;
     }
 
-    private static JSONObject cachedNetwork(Context context, String identity) {
+    private static JSONObject cachedNetwork(Context context, String identity,String fullIdentity,WeatherSourceSession session) {
         try {
-            SharedPreferences prefs = context.getSharedPreferences("weather_real_alerts_v1", Context.MODE_PRIVATE);
+            SharedPreferences prefs = WeatherAlerts.state(context,session);
+            String source=prefs.getString("snapshot_source",session.xiaomi()?"xiaomi":"");
+            if(!session.sourceId.equals(source)||!WeatherSources.isCurrent(context,session))return null;
+            if(!fullIdentity.equals(prefs.getString("snapshot_identity",session.xiaomi()?fullIdentity:"")))return null;
             if (!identity.equals(prefs.getString("snapshot_city", ""))) return null;
             String json = prefs.getString("snapshot", null);
             return json == null ? null : new JSONObject(json);
@@ -146,7 +165,7 @@ public final class WeatherWidgetExtendedData {
         return out;
     }
 
-    /** Pure parser: provider publication timestamps define forecast indices, never wall-clock guesses. */
+    /** Pure parser: provider timestamps or explicit provider dates define forecast indices. */
     static JSONObject parse(JSONObject raw, String unit, String locale, long now) throws Exception {
         JSONObject out = empty();
         JSONArray hourly = new JSONArray(), daily = new JSONArray();
@@ -196,10 +215,12 @@ public final class WeatherWidgetExtendedData {
             JSONObject temps = days.optJSONObject("temperature");
             JSONArray ranges = values(temps), suns = values(days.optJSONObject("sunRiseSet"));
             JSONArray codes = values(days.optJSONObject("weather"));
-            // Sunrise is an explicit provider timestamp for each calendar day, including offset.
+            // Alternate-source calendar dates remain usable when polar sunrise is unavailable.
+            // Ordinary Xiaomi rows retain the original sunrise timestamp date contract.
             if (ranges != null && suns != null) for (int i = 0; i < ranges.length() && i < suns.length(); i++) {
                 JSONObject sun = suns.optJSONObject(i), range = ranges.optJSONObject(i);
-                OffsetDateTime time = sun == null ? null : date(sun.optString("from", ""));
+                OffsetDateTime time = XiaomiWeatherParser.providerDailyTime(raw,i);
+                if(time==null)time=sun == null ? null : date(sun.optString("from", ""));
                 if (time == null || range == null || time.toLocalDate().isBefore(
                         java.time.Instant.ofEpochMilli(now).atOffset(time.getOffset()).toLocalDate())) continue;
                 String high = temperature(range.optString("from", ""), temps.optString("unit", ""), unit);
