@@ -84,7 +84,10 @@ def audit(apk):
                 if duplicates:
                     raise AssertionError('Duplicate packaged definitions: ' + str(sorted(duplicates)))
                 classes.update(entries)
-        assert not any(name.endswith('.onnx') for name in archive.namelist()), 'Model must be optional storage'
+        # The small, general pronunciation frontend is packaged; character TTS
+        # weights and reference tensors must remain optional private storage.
+        bundled_models = [name for name in archive.namelist() if name.endswith('.onnx')]
+        assert bundled_models == ['assets/tibao_frontend/g2pm.onnx'], 'Unexpected bundled speech weights'
         assert 'lib/arm64-v8a/libsherpa-onnx-jni.so' in archive.namelist(), 'Native synthesizer absent'
     interface = 'Ldev/weather/speech/kotlin/jvm/functions/Function1;'
     candidates = [(owner, value) for owner, value in classes.items()
