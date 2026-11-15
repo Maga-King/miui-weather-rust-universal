@@ -27,6 +27,9 @@ public final class WeatherAppearanceActivity extends WeatherWidgetSettingsActivi
         toggle(content,chinese?"\u4e3b\u9875\u5361\u7247\u6a21\u7cca":"Blur home cards",
                 chinese?"\u9ed8\u8ba4\u5f00\u542f\uff1b\u53ea\u5f71\u54cd\u5929\u6c14\u4e3b\u9875\uff0c\u4e0d\u5f71\u54cd\u684c\u9762\u5c0f\u7ec4\u4ef6":"On by default; affects the Weather home screen, not widgets",
                 WeatherAppearancePreferences.homeCardBlurEnabled(this),enabled->saveFlag("home_card_blur",enabled));
+        toggle(content,chinese?"\u4f7f\u7528 ColorOS \u4f4d\u7f6e\u663e\u793a\u89c4\u5219":"Use ColorOS location labels",
+                chinese?"优先显示附近地标；无地标时显示街道，默认关闭":"Prefer nearby landmarks, falling back to streets; off by default",
+                AndroidLocation.colorOsLocationRules(this),enabled->saveFlag("coloros_location_rules",enabled));
         note(content,chinese?"字体":"Font");
         toggle(content,chinese?"使用 MiSans":"Use MiSans",chinese?"关闭后跟随系统字体":"Turn off to use your system font",WeatherFonts.miSansEnabled(this),
                 enabled->{WeatherFonts.setMiSansEnabled(this,enabled);WeatherFonts.apply(this);});
@@ -77,6 +80,7 @@ public final class WeatherAppearanceActivity extends WeatherWidgetSettingsActivi
     private interface Change {void changed(boolean enabled);}
     private void saveFlag(String key,boolean enabled) {
         if("home_card_blur".equals(key)) WeatherAppearancePreferences.setHomeCardBlurEnabled(this,enabled);
+        else if("coloros_location_rules".equals(key)) WeatherAppearancePreferences.setColorOsLocationRulesEnabled(this,enabled);
         else throw new IllegalArgumentException("Unknown appearance option: "+key);
     }
     private void toggle(LinearLayout parent,String title,String summary,boolean enabled,Change change) {

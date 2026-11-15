@@ -28,7 +28,7 @@ def main():
     def shell(*command):return run(adb+['shell',*command],capture_output=True,text=True,encoding='utf-8').stdout.strip()
     run([java/'javac.exe','--release','8','-encoding','UTF-8','-classpath',android,'-d',classes,
         ROOT/'port/AndroidPermissions.java',ROOT/'port/AndroidLocation.java',ROOT/'port/AndroidLocationLabels.java',
-        ROOT/'port/WeatherAppearancePreferences.java',ROOT/'tests/PermissionRegressionProbe.java'])
+        ROOT/'port/ColorOsPlaceResolver.java',ROOT/'port/WeatherAppearancePreferences.java',ROOT/'tests/PermissionRegressionProbe.java'])
     run([java/'java.exe','-cp',bt/'lib/d8.jar','com.android.tools.r8.D8','--min-api','28','--lib',android,'--output',dex,*classes.rglob('*.class')])
     manifest=work/'AndroidManifest.xml'
     manifest.write_text('''<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="dev.weather.permissionprobe">

@@ -1,8 +1,8 @@
 {
-  "apk_sha256": "b7b1309fd4113b0df9b446c091c8e572445d7cafa8b59338ba346b39d81b2770",
-  "bytes": 122054740,
+  "apk_sha256": "de73834fb2384f36f088b439a1b0b9e5c01c8b84baf8ee9994f6e678d5a13d1b",
+  "bytes": 122058836,
   "payload_sha256": {
-    "AndroidManifest.xml": "f29e7f5e89955bc432af68f0a7cedb7c9e32097abcba3473ed3df45e218e95db",
+    "AndroidManifest.xml": "5ae8a6ac018eca7693a727dbd6c9bb75112bdd7983f2b063db1311db9d68d0fb",
     "assets/app_functions_v2.xml": "666904786532162e07414ad368b40a0870573a45755cfaba4d254ccf18a6855f",
     "assets/app_tools.json": "dc7586e87b4e3a634beeed7ea231c37b6e7fce72d49d82af9d30e83ae31a0afa",
     "assets/appfunctions.xml": "7f26ff0050a25aa6a5aef08e3f863056bc24765c94b6e213f96b8967cfbfc433",
@@ -783,7 +783,7 @@
     "assets/weather_widget/weather1/weather_3/night.png": "590a6f16bfc8c97e53498c3a415413c1150bd298222ae9c0bcc038c46b811459",
     "assets/weather_widget/weather1/weather_4/day.png": "b892a11648b96e963e9e518718b0f8eda1fa699cbf795376477032a6ddc3ab36",
     "assets/weather_widget/weather1/weather_7/day.png": "8f546c30b704fcaeef765ddd5d54886664ce519bb5c3471282eede7b8947fa36",
-    "classes.dex": "f0a379cf6c9dbac03147e0535cfc1a0ccbfabc332745f9bff45c5bc05edd04e0",
+    "classes.dex": "a461bf3e7415f183907ccbef1d451e5bc3f4049a78255c6757aab934e209dfdb",
     "classes2.dex": "4b333a9e9802f35094c84cc0aba276c7ff25a4b9bd8ec9e1eec5e42dc5e6e923",
     "lib/arm64-v8a/libAMapSDK_MAP_v11_1_260.so": "3aaa344f25555b54d0fac917693b611155490bfd63c94e303dcefdae02c3d95d",
     "lib/arm64-v8a/libabi_stable.dylib.so": "365960e5ab59fb8524c0069c1ea1594fa622f2749e3f81ed492e65a7df1504a1",

@@ -44,15 +44,24 @@ public final class AndroidLocation {
 
     private static final String TAG = "WeatherLocation";
     private static final long FIX_TIMEOUT_MS = 15000;
-    // Keep the original rich caller within its 20-second request deadline.
+    // The original rich XMS caller times out after 20 seconds. Reserve its
+    // optional 6.5-second place lookup and 2.5-second Geocoder fallback.
     private static final long RICH_FIX_TIMEOUT_MS = 10000;
     private static final long GEOCODER_TIMEOUT_MS = 2500;
+    private static final long COLOROS_TIMEOUT_MS = 6500;
     private static final long MAX_FIX_AGE_NANOS = 120000000000L;
     // One process-wide worker bounds resources even if a device's old Geocoder
     // ignores interruption. A busy backend falls back to the real coordinates.
     private static final ThreadPoolExecutor GEOCODER_WORKER = new ThreadPoolExecutor(
             1, 1, 30L, TimeUnit.SECONDS, new ArrayBlockingQueue<Runnable>(1), runnable -> {
                 Thread thread = new Thread(runnable, "WeatherGeocoder");
+                thread.setDaemon(true);
+                return thread;
+            }, new ThreadPoolExecutor.AbortPolicy());
+    // Keep a stalled network resolver separate from Android's Geocoder fallback.
+    private static final ThreadPoolExecutor COLOROS_WORKER = new ThreadPoolExecutor(
+            1, 1, 30L, TimeUnit.SECONDS, new ArrayBlockingQueue<Runnable>(1), runnable -> {
+                Thread thread = new Thread(runnable, "WeatherColorOsPlace");
                 thread.setDaemon(true);
                 return thread;
             }, new ThreadPoolExecutor.AbortPolicy());
@@ -138,11 +147,14 @@ public final class AndroidLocation {
         private final Result result;
         private final Runnable fixTimeout = this::fixExpired;
         private final Runnable geocoderTimeout = () -> succeed(null);
+        private final Runnable placeTimeout = this::fallbackPlace;
         private final Set<String> providers = new LinkedHashSet<>();
         private final Map<String, CancellationSignal> currentRequests = new LinkedHashMap<>();
         private Location fix;
         private Future<?> geocoderTask;
         private WeakReference<Query> geocoderTarget;
+        private Future<?> placeTask;
+        private WeakReference<Query> placeTarget;
         private boolean finished;
 
         Query(boolean stringResult, Result result) {
@@ -338,7 +350,52 @@ public final class AndroidLocation {
             geocode();
         }
 
-        void geocode() { geocodeAndroid(); }
+        void geocode() {
+            if (colorOsLocationRules(activity) && networkAllowed(activity)) {
+                resolvePlace();
+            } else geocodeAndroid();
+        }
+
+        void resolvePlace() {
+            try {
+                main.postDelayed(placeTimeout, COLOROS_TIMEOUT_MS);
+                placeTarget = new WeakReference<>(this);
+                placeTask = COLOROS_WORKER.submit(new PlaceTask(activity.getApplicationContext(),
+                        fix.getLatitude(), fix.getLongitude(), Locale.getDefault().toLanguageTag(),
+                        main, placeTarget));
+            } catch (RejectedExecutionException busy) {
+                Log.i(TAG, "ColorOS place resolver is busy; using Android Geocoder");
+                fallbackPlace();
+            } catch (RuntimeException unavailable) {
+                fallbackPlace();
+            }
+        }
+
+        void resolvedPlace(ColorOsPlaceResolver.PlaceResult place) {
+            if (finished || destroyed || fix == null) return;
+            if (!colorOsLocationRules(activity) || !networkAllowed(activity) || place == null
+                    || text(place.cityName).trim().isEmpty() || !place.hasPlace() || placeLabel(place).isEmpty()) {
+                fallbackPlace();
+                return;
+            }
+            succeed(null, place);
+        }
+
+        void fallbackPlace() {
+            if (finished || destroyed) return;
+            cancelPlace();
+            geocodeAndroid();
+        }
+
+        void cancelPlace() {
+            main.removeCallbacks(placeTimeout);
+            if (placeTarget != null) { placeTarget.clear(); placeTarget = null; }
+            if (placeTask != null) {
+                placeTask.cancel(true);
+                if (placeTask instanceof Runnable) COLOROS_WORKER.remove((Runnable) placeTask);
+                placeTask = null;
+            }
+        }
 
         void geocodeAndroid() {
             try {
@@ -376,6 +433,10 @@ public final class AndroidLocation {
         @Override public void onStatusChanged(String provider, int status, Bundle extras) { }
 
         void succeed(Address address) {
+            succeed(address, null);
+        }
+
+        void succeed(Address address, ColorOsPlaceResolver.PlaceResult place) {
             if (finished || fix == null || destroyed) return;
             Map<String, Object> value = new LinkedHashMap<>();
             value.put("mLatitude", fix.getLatitude());
@@ -384,18 +445,18 @@ public final class AndroidLocation {
                 // The original XMS schema uses the district as mCityName. Dart
                 // copies it over the weather server's selected district name in
                 // zh_cn; locality belongs in mLocality, not in that override.
-                String city = address == null ? "" : first(address.getSubLocality(),
+                String city = place != null ? text(place.cityName) : address == null ? "" : first(address.getSubLocality(),
                         first(address.getSubAdminArea(), address.getLocality()));
-                String street = address == null ? "" : AndroidLocationLabels.choose(city,
+                String street = place != null ? placeLabel(place) : address == null ? "" : AndroidLocationLabels.choose(city,
                         address.getAdminArea(), address.getLocality(), address.getSubAdminArea(),
                         address.getSubLocality(), address.getThoroughfare(), address.getPremises(),
                         address.getFeatureName(), address.getSubThoroughfare(), false);
                 value.put("mCityName", city);
                 value.put("mStreetName", street);
-                value.put("mAdminArea", address == null ? "" : text(address.getAdminArea()));
-                value.put("mLocality", address == null ? "" : text(address.getLocality()));
-                value.put("mSubLocality", address == null ? "" : text(address.getSubLocality()));
-                value.put("mCountryName", address == null ? "" : text(address.getCountryName()));
+                value.put("mAdminArea", place != null ? text(place.adminArea) : address == null ? "" : text(address.getAdminArea()));
+                value.put("mLocality", place != null ? text(place.locality) : address == null ? "" : text(address.getLocality()));
+                value.put("mSubLocality", place != null ? text(place.cityName) : address == null ? "" : text(address.getSubLocality()));
+                value.put("mCountryName", place != null ? text(place.countryName) : address == null ? "" : text(address.getCountryName()));
                 value.put("mErrorCode", 0);
                 value.put("mErrorInfo", "");
                 value.put("mLocationType", text(fix.getProvider()));
@@ -448,6 +509,7 @@ public final class AndroidLocation {
             finished = true;
             main.removeCallbacks(fixTimeout);
             main.removeCallbacks(geocoderTimeout);
+            cancelPlace();
             if (geocoderTarget != null) geocoderTarget.clear();
             if (geocoderTask != null) {
                 geocoderTask.cancel(true);
@@ -476,6 +538,45 @@ public final class AndroidLocation {
         long timestamp = location.getElapsedRealtimeNanos();
         long now = SystemClock.elapsedRealtimeNanos();
         return timestamp > 0 && timestamp <= now && now - timestamp <= MAX_FIX_AGE_NANOS;
+    }
+
+    private static String placeLabel(ColorOsPlaceResolver.PlaceResult place) {
+        return AndroidLocationLabels.choose(place.cityName, place.adminArea, place.locality,
+                "", place.cityName, "", place.placeName, "", "", true);
+    }
+
+    /** Uses the same persisted consent as WeatherRefresh without starting refresh work. */
+    private static boolean networkAllowed(Context context) {
+        return context.getSharedPreferences("weather_refresh_state", Context.MODE_PRIVATE)
+                .getBoolean("network_allowed", false);
+    }
+
+    private static final class PlaceTask implements Runnable {
+        private final Context context;
+        private final double latitude, longitude;
+        private final String language;
+        private final Handler main;
+        private final WeakReference<Query> target;
+        PlaceTask(Context context, double latitude, double longitude, String language,
+                Handler main, WeakReference<Query> target) {
+            this.context = context; this.latitude = latitude; this.longitude = longitude;
+            this.language = language; this.main = main; this.target = target;
+        }
+        @Override public void run() {
+            ColorOsPlaceResolver.PlaceResult place = null;
+            try {
+                if (target.get() == null || Thread.currentThread().isInterrupted()) return;
+                if (colorOsLocationRules(context) && networkAllowed(context))
+                    place = ColorOsPlaceResolver.resolve(context, latitude, longitude, language);
+            } catch (Exception unavailable) {
+                Log.i(TAG, "ColorOS place unavailable; using Android Geocoder");
+            }
+            final ColorOsPlaceResolver.PlaceResult resolved = place;
+            main.post(() -> {
+                Query query = target.get();
+                if (query != null) query.resolvedPlace(resolved);
+            });
+        }
     }
 
     /** Weak replies cannot keep a destroyed Activity alive or reply after cancellation. */
@@ -526,6 +627,14 @@ public final class AndroidLocation {
 
     private static String first(String preferred, String fallback) {
         return preferred == null || preferred.trim().isEmpty() ? text(fallback).trim() : preferred.trim();
+    }
+
+    /**
+     * The real ColorOS place service is opt-in and also requires network consent.
+     * Both the service result and Android fallback suppress administrative repeats.
+     */
+    public static boolean colorOsLocationRules(Context context) {
+        return WeatherAppearancePreferences.colorOsLocationRulesEnabled(context);
     }
 
 }

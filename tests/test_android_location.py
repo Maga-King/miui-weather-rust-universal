@@ -164,12 +164,14 @@ public class AndroidLocationBridgeCheck {
   return begin("weather_method_channel","query_xms_core_reverse_geography",args);}
  static void await(CountDownLatch latch)throws Exception {check(latch.await(3,TimeUnit.SECONDS),"worker progressed");}
  static void deliver()throws Exception {await(Geocoder.ended);for(int i=0;i<30;i++){Handler.flush();Thread.sleep(2);}Handler.flush();}
+ static void placeMode(boolean consent){WeatherAppearancePreferences.setColorOsLocationRulesEnabled(activity,true);
+  activity.getSharedPreferences("weather_refresh_state",0).edit().putBoolean("network_allowed",consent).commit();}
  static void deliverPlace()throws Exception {await(ColorOsPlaceResolver.ended);for(int i=0;i<30;i++){Handler.flush();Thread.sleep(2);}Handler.flush();}
  static void deliverFallback()throws Exception {deliverPlace();deliver();}
  static String field(Reply r,String name){return (String)new org.json.JSONObject((String)r.value).opt(name);}
  static String street(Reply r){return field(r,"mStreetName");}
  public static void main(String[] args)throws Exception {
-  setup(31,false);
+  setup(31,false);check(!AndroidLocation.colorOsLocationRules(activity),"setting defaults off");
   Reply coordinates=begin("weather_location","location_amp_nlp",null);activity.manager.emit();
   check(coordinates.replies==1&&coordinates.value instanceof Map,"weather Map contract");
   check(((Map<?,?>)coordinates.value).size()==2,"lat/lng-only Dart consumes only coordinates");
@@ -182,12 +184,75 @@ public class AndroidLocationBridgeCheck {
   districtOnly.feature="黄岛区";Geocoder.addresses=Arrays.asList(districtOnly);Reply district=reverse();deliver();
   check("黄岛区".equals(field(district,"mCityName")),"district-only result keeps district");
   check("".equals(street(district)),"district fallback is not appended to the same district");location.onDestroy();
+  setup(31,false);districtOnly=new Address();districtOnly.street="";districtOnly.premises="";districtOnly.feature="黄岛区";
+  Geocoder.addresses=Arrays.asList(districtOnly);WeatherAppearancePreferences.setColorOsLocationRulesEnabled(activity,true);
+  Reply districtNearby=reverse();deliver();check("".equals(street(districtNearby)),"ColorOS skips administrative feature and fallback");location.onDestroy();
   setup(31,false);Address county=new Address();county.subLocality="";county.subAdmin="真实县";
   Geocoder.addresses=Arrays.asList(county);Reply countyResult=reverse();deliver();
   check("真实县".equals(field(countyResult,"mCityName")),"subadmin fallback preserves district level");location.onDestroy();
   setup(31,false);Address locality=new Address();locality.subLocality=null;locality.subAdmin="";
   Geocoder.addresses=Arrays.asList(locality);Reply localityResult=reverse();deliver();
   check("青岛市".equals(field(localityResult,"mCityName")),"locality used only when district unavailable");location.onDestroy();
+  setup(31,false);WeatherAppearancePreferences.setColorOsLocationRulesEnabled(activity,true);
+  Reply nearby=reverse();deliver();check("长江路".equals(street(nearby)),"without consent ColorOS uses ordinary Geocoder street");
+  check(ColorOsPlaceResolver.calls==0,"ColorOS option cannot bypass network consent");location.onDestroy();
+  setup(31,false);placeMode(true);Reply optedCoordinates=begin("weather_location","location_amp_nlp",null);activity.manager.emit();
+  check(optedCoordinates.replies==1&&ColorOsPlaceResolver.calls==0&&Geocoder.started.getCount()==1,"coordinate-only caller never starts discarded landmark work");location.onDestroy();
+  setup(31,false);activity.getSharedPreferences("weather_refresh_state",0).edit().putBoolean("network_allowed",true).commit();
+  Reply off=reverse();deliver();check(ColorOsPlaceResolver.calls==0,"switch off makes no ColorOS request");location.onDestroy();
+  setup(31,false);placeMode(true);Geocoder.present=false;
+  ColorOsPlaceResolver.result=new ColorOsPlaceResolver.PlaceResult("黄岛区","青岛理工大学（黄岛校区）",0);
+  Reply campus=reverse();deliverPlace();check(campus.replies==1&&"青岛理工大学（黄岛校区）".equals(street(campus)),"verified backend landmark populates street");
+  check("黄岛区".equals(field(campus,"mCityName"))&&"青岛市".equals(field(campus,"mLocality")),"backend keeps district and locality separate");
+  check(Geocoder.started.getCount()==1,"successful place does not invoke Android Geocoder");
+  check(ColorOsPlaceResolver.latitude==36&&ColorOsPlaceResolver.longitude==120,"resolver receives real WGS84 coordinates without translation");
+  check(ColorOsPlaceResolver.language.equals(Locale.getDefault().toLanguageTag()),"resolver receives actual locale");
+  org.json.JSONObject campusJson=new org.json.JSONObject((String)campus.value);
+  check(((Number)campusJson.opt("mLatitude")).doubleValue()==36&&((Number)campusJson.opt("mLongitude")).doubleValue()==120,"payload retains input fix instead of server-city centroid");location.onDestroy();
+  setup(31,false);placeMode(true);ColorOsPlaceResolver.throwsError=true;Reply placeError=reverse();deliverFallback();
+  check(placeError.replies==1&&"长江路".equals(street(placeError)),"backend error uses ordinary Geocoder fallback");location.onDestroy();
+  setup(31,false);placeMode(true);ColorOsPlaceResolver.result=new ColorOsPlaceResolver.PlaceResult("黄岛区","",0);
+  Reply noPoi=reverse();deliverFallback();check("长江路".equals(street(noPoi)),"no backend landmark falls back to street");location.onDestroy();
+  setup(31,false);placeMode(true);ColorOsPlaceResolver.result=new ColorOsPlaceResolver.PlaceResult("黄岛区","科技中心",1);
+  Reply disabledPoi=reverse();deliverFallback();check("长江路".equals(street(disabledPoi)),"backend disabled detail status cannot display POI");location.onDestroy();
+  setup(31,false);placeMode(true);ColorOsPlaceResolver.result=new ColorOsPlaceResolver.PlaceResult("黄岛区","黄岛区",0);
+  Reply duplicatePoi=reverse();deliverFallback();check("长江路".equals(street(duplicatePoi)),"administrative backend label cannot duplicate district");location.onDestroy();
+  setup(31,false);placeMode(true);ColorOsPlaceResolver.result=new ColorOsPlaceResolver.PlaceResult("","真实地标",0);
+  Reply missingDistrict=reverse();deliverFallback();check("黄岛区".equals(field(missingDistrict,"mCityName"))&&"长江路".equals(street(missingDistrict)),"incomplete backend city falls back without losing district");location.onDestroy();
+  setup(31,false);placeMode(true);ColorOsPlaceResolver.reset(true);
+  ColorOsPlaceResolver.result=new ColorOsPlaceResolver.PlaceResult("黄岛区","真实地标",0);
+  Reply placeSlow=reverse();await(ColorOsPlaceResolver.started);Handler.advance(6500);deliver();
+  check(placeSlow.replies==1&&"长江路".equals(street(placeSlow)),"backend deadline starts bounded Geocoder fallback");
+  ColorOsPlaceResolver.gate.countDown();deliverPlace();check(placeSlow.replies==1&&"长江路".equals(street(placeSlow)),"late backend cannot replace fallback");location.onDestroy();
+  setup(31,false);placeMode(true);ColorOsPlaceResolver.reset(true);Reply placePaused=reverse();await(ColorOsPlaceResolver.started);
+  location.onPause();check(placePaused.replies==1&&"CANCELLED".equals(placePaused.code),"pause cancels backend once");
+  ColorOsPlaceResolver.gate.countDown();deliverPlace();check(placePaused.replies==1&&Geocoder.started.getCount()==1,"cancelled backend does not start fallback");location.onDestroy();
+  setup(31,false);placeMode(true);ColorOsPlaceResolver.reset(true);Reply placeDead=reverse();await(ColorOsPlaceResolver.started);
+  location.onDestroy();ColorOsPlaceResolver.gate.countDown();deliverPlace();Handler.advance(6500);
+  check(placeDead.replies==0&&Geocoder.started.getCount()==1,"destroy suppresses backend reply and fallback");
+  setup(31,false);placeMode(true);ColorOsPlaceResolver.reset(true);
+  Reply placeOccupied=reverse();await(ColorOsPlaceResolver.started);Reply placeQueued=reverse();Reply placeFull=reverse();deliver();
+  check(placeFull.replies==1&&"长江路".equals(street(placeFull)),"saturated backend uses independent Geocoder worker");
+  location.onDestroy();ColorOsPlaceResolver.gate.countDown();deliverPlace();Handler.advance(6500);
+  check(placeOccupied.replies==0&&placeQueued.replies==0&&ColorOsPlaceResolver.calls==1,"destroy removes queued backend work");
+  setup(31,false);placeMode(true);ColorOsPlaceResolver.reset(true);
+  ColorOsPlaceResolver.result=new ColorOsPlaceResolver.PlaceResult("黄岛区","真实地标",0);
+  Reply revokedConsent=reverse();await(ColorOsPlaceResolver.started);
+  activity.getSharedPreferences("weather_refresh_state",0).edit().putBoolean("network_allowed",false).commit();
+  ColorOsPlaceResolver.gate.countDown();deliverFallback();check("长江路".equals(street(revokedConsent)),"revoked network consent rejects late backend result");location.onDestroy();
+  setup(31,false);placeMode(true);ColorOsPlaceResolver.reset(true);
+  ColorOsPlaceResolver.result=new ColorOsPlaceResolver.PlaceResult("黄岛区","真实地标",0);
+  Reply revokedOption=reverse();await(ColorOsPlaceResolver.started);WeatherAppearancePreferences.setColorOsLocationRulesEnabled(activity,false);
+  ColorOsPlaceResolver.gate.countDown();deliverFallback();check("长江路".equals(street(revokedOption)),"disabled option rejects late backend result");location.onDestroy();
+  setup(33,false);placeMode(true);ColorOsPlaceResolver.result=new ColorOsPlaceResolver.PlaceResult("黄岛区","真实地标",0);
+  Reply newPlace=reverse();deliverPlace();check("真实地标".equals(street(newPlace))&&Geocoder.listener==null,"API33 uses same backend before async Geocoder");location.onDestroy();
+  setup(33,false);placeMode(true);ColorOsPlaceResolver.throwsError=true;Reply newFallback=reverse();deliverPlace();
+  check(newFallback.replies==0&&Geocoder.listener!=null,"API33 backend error starts asynchronous fallback");
+  Geocoder.listener.onGeocode(Geocoder.addresses);Handler.flush();check("长江路".equals(street(newFallback)),"API33 fallback maps ordinary street");location.onDestroy();
+  setup(31,false);placeMode(true);ColorOsPlaceResolver.reset(true);Geocoder.present=false;
+  Reply noServices=reverse();await(ColorOsPlaceResolver.started);Handler.advance(6500);
+  check(noServices.replies==1&&"".equals(street(noServices)),"backend timeout without Geocoder returns original coordinates");
+  ColorOsPlaceResolver.gate.countDown();deliverPlace();check(noServices.replies==1,"late result after both services unavailable replies once");location.onDestroy();
   setup(31,false);Reply xms=begin("xms_location","locationFromNlp",true);activity.manager.emit();deliver();
   check(xms.replies==1&&xms.value instanceof String,"legacy XMS JSON string");
   check(activity.manager.listeners.isEmpty(),"fix removes providers");location.onDestroy();
